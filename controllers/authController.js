@@ -71,7 +71,8 @@ exports.login = async (req, res, next) => {
     if (!user || !(await user.comparePassword(password))) {
       return sendError(res, 401, 'Invalid email or password.');
     }
-    if (!user.isVerified) return sendError(res, 403, 'Please verify your email first.');
+    // OTP verification check is temporarily bypassed for login.
+    // if (!user.isVerified) return sendError(res, 403, 'Please verify your email first.');
     if (!user.isActive)   return sendError(res, 401, 'Account deactivated.');
     if (user.isBlocked)   return sendError(res, 403, 'Account blocked. Contact support.');
 
