@@ -8,6 +8,59 @@ const Service = require('../models/Service');
 const Testimonial = require('../models/Testimonial');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
 
+const ADMIN_CREATABLE_ROLES = ['admin', 'recruiter', 'employer', 'job_seeker'];
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
+
+const cleanString = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const buildUserPayload = (body = {}) => {
+  const firstName = cleanString(body.firstName);
+  const lastName = cleanString(body.lastName);
+  const email = cleanString(body.email).toLowerCase();
+  const phone = cleanString(body.phone);
+  const password = body.password || '';
+  const role = cleanString(body.role);
+  const companyName = cleanString(body.companyName);
+  const companyWebsite = cleanString(body.companyWebsite);
+  const companyDescription = cleanString(body.companyDescription);
+  const companyLocation = cleanString(body.companyLocation);
+
+  const errors = {};
+
+  if (!firstName || firstName.length < 2) errors.firstName = 'First name must be at least 2 characters.';
+  if (!lastName || lastName.length < 2) errors.lastName = 'Last name must be at least 2 characters.';
+  if (!email || !EMAIL_REGEX.test(email)) errors.email = 'Enter a valid email address.';
+  if (phone && !INDIAN_MOBILE_REGEX.test(phone)) errors.phone = 'Enter a valid 10-digit Indian mobile number.';
+  if (!password || password.length < 8) errors.password = 'Password must be at least 8 characters.';
+  if (!ADMIN_CREATABLE_ROLES.includes(role)) errors.role = 'Select a valid role.';
+
+  if (role === 'employer') {
+    if (!companyName || companyName.length < 2) errors.companyName = 'Company name is required for employer users.';
+    if (!companyDescription || companyDescription.length < 20) errors.companyDescription = 'Company description must be at least 20 characters.';
+  }
+
+  return {
+    errors,
+    data: {
+      firstName,
+      lastName,
+      email,
+      phone: phone || undefined,
+      password,
+      role,
+      company: role === 'employer'
+        ? {
+            name: companyName,
+            website: companyWebsite || undefined,
+            description: companyDescription,
+            location: companyLocation || undefined,
+          }
+        : undefined,
+    },
+  };
+};
+
 // @GET /api/v1/admin/dashboard-stats
 exports.getDashboardStats = async (req, res, next) => {
   try {
@@ -96,6 +149,42 @@ exports.getUsers = async (req, res, next) => {
       User.countDocuments(query),
     ]);
     sendPaginated(res, users, total, page, limit);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @POST /api/v1/admin/users
+exports.createUser = async (req, res, next) => {
+  try {
+    const { errors, data } = buildUserPayload(req.body);
+
+    if (Object.keys(errors).length > 0) {
+      return sendError(res, 400, 'Please correct the highlighted fields.', errors);
+    }
+
+    const existingUser = await User.findOne({ email: data.email });
+    if (existingUser) {
+      return sendError(res, 409, 'Email already registered.', { email: 'This email is already in use.' });
+    }
+
+    const user = await User.create({
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      phone: data.phone,
+      password: data.password,
+      role: data.role,
+      isVerified: true,
+      createdBy: req.user._id,
+      ...(data.company ? { company: data.company } : {}),
+    });
+
+    sendSuccess(res, 201, 'User created successfully.', {
+      data: {
+        user,
+      },
+    });
   } catch (error) {
     next(error);
   }

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
-  getDashboardStats, getUsers, toggleBlockUser, changeUserRole,
+  getDashboardStats, getUsers, createUser, toggleBlockUser, changeUserRole,
   getContacts, getPayments, getApplications, getBlogs, getServices, getTestimonials, approveTestimonial,
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middlewares/auth');
@@ -10,6 +10,7 @@ const adminOnly = [protect, authorize('admin', 'super_admin', 'recruiter')];
 
 router.get('/dashboard-stats', ...adminOnly, getDashboardStats);
 router.get('/users', ...adminOnly, getUsers);
+router.post('/users', ...adminOnly, createUser);
 router.patch('/users/:id/block', ...adminOnly, toggleBlockUser);
 router.patch('/users/:id/role', ...adminOnly, changeUserRole);
 router.get('/contacts', ...adminOnly, getContacts);
