@@ -221,6 +221,22 @@ exports.changeUserRole = async (req, res, next) => {
   }
 };
 
+// @PATCH /api/v1/admin/users/:id/approve
+exports.approveUser = async (req, res, next) => {
+  try {
+    const { approve } = req.body // { approve: true/false }
+    const user = await User.findById(req.params.id)
+    if (!user) return sendError(res, 404, 'User not found.')
+    if (user.role === 'super_admin') return sendError(res, 403, 'Cannot modify super admin.')
+
+    user.isApproved = approve === false ? false : true
+    await user.save()
+    sendSuccess(res, 200, `User ${user.isApproved ? 'approved' : 'unapproved'}.`, { data: { user } })
+  } catch (error) {
+    next(error)
+  }
+}
+
 // @DELETE /api/v1/admin/users/:id
 exports.deleteUser = async (req, res, next) => {
   try {
