@@ -4,6 +4,26 @@ const Notification = require('../models/Notification');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
 const { sendTemplateEmail } = require('../utils/emailService');
 
+const APPLICATION_FLOW = {
+  applied: ['screening', 'rejected'],
+  screening: ['shortlisted', 'rejected'],
+  shortlisted: ['interview_scheduled', 'rejected'],
+  interview_scheduled: ['offered', 'rejected'],
+  interviewed: ['offered', 'rejected'],
+  offered: ['hired', 'rejected'],
+  hired: [],
+  rejected: [],
+  withdrawn: [],
+};
+
+const INTERVIEW_TYPES = ['phone', 'video', 'in_person', 'technical'];
+
+const canManageApplication = (application, user) => {
+  const isOwner = application.employer.toString() === user._id.toString();
+  const isAdmin = ['admin', 'super_admin', 'recruiter'].includes(user.role);
+  return isOwner || isAdmin;
+};
+
 // @POST /api/v1/applications  - Job Seeker
 exports.applyForJob = async (req, res, next) => {
   try {
@@ -106,9 +126,19 @@ exports.updateApplicationStatus = async (req, res, next) => {
     const application = await Application.findById(req.params.id).populate('job applicant');
     if (!application) return sendError(res, 404, 'Application not found.');
 
-    const isOwner = application.employer.toString() === req.user._id.toString();
-    const isAdmin = ['admin', 'super_admin', 'recruiter'].includes(req.user.role);
-    if (!isOwner && !isAdmin) return sendError(res, 403, 'Not authorized.');
+    if (!canManageApplication(application, req.user)) return sendError(res, 403, 'Not authorized.');
+
+    if (!APPLICATION_FLOW[application.status]) {
+      return sendError(res, 400, 'Current application status is invalid.');
+    }
+
+    if (!APPLICATION_FLOW[application.status].includes(status)) {
+      return sendError(res, 400, `Cannot move application from ${application.status.replace(/_/g, ' ')} to ${String(status || '').replace(/_/g, ' ')}.`);
+    }
+
+    if (status === 'interview_scheduled') {
+      return sendError(res, 400, 'Please use schedule interview to set the interview date and time.');
+    }
 
     application.statusHistory.push({ status: application.status, changedBy: req.user._id, note });
     application.status = status;
@@ -155,16 +185,34 @@ exports.scheduleInterview = async (req, res, next) => {
     const application = await Application.findById(req.params.id).populate('applicant job');
     if (!application) return sendError(res, 404, 'Application not found.');
 
-    application.interview = { scheduledAt, type, link, location, notes };
+    if (!canManageApplication(application, req.user)) return sendError(res, 403, 'Not authorized.');
+    if (application.status !== 'shortlisted') {
+      return sendError(res, 400, 'Only shortlisted applications can be scheduled for interview.');
+    }
+
+    const interviewDate = scheduledAt ? new Date(scheduledAt) : null;
+    if (!interviewDate || Number.isNaN(interviewDate.getTime())) {
+      return sendError(res, 400, 'Interview date and time is required.');
+    }
+    if (interviewDate <= new Date()) {
+      return sendError(res, 400, 'Interview date and time must be in the future.');
+    }
+    if (type && !INTERVIEW_TYPES.includes(type)) {
+      return sendError(res, 400, 'Select a valid interview type.');
+    }
+
+    application.statusHistory.push({ status: application.status, changedBy: req.user._id, note: 'Interview scheduled' });
+    application.interview = { scheduledAt: interviewDate, type: type || 'video', link, location, notes };
     application.status = 'interview_scheduled';
     await application.save();
 
     // Notify applicant
     await Notification.create({
       recipient: application.applicant._id,
+      sender: req.user._id,
       type: 'interview_scheduled',
       title: 'Interview Scheduled',
-      message: `Interview scheduled for ${application.job.title} on ${new Date(scheduledAt).toLocaleString()}`,
+      message: `Interview scheduled for ${application.job.title} on ${interviewDate.toLocaleString()}`,
       link: '/dashboard/interviews',
     });
 

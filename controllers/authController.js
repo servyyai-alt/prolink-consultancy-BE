@@ -205,6 +205,8 @@ const sanitizeUser = (user) => ({
   phone: user.phone,
   role: user.role,
   avatar: user.avatar,
+  profile: user.profile,
+  company: user.company,
   isVerified: user.isVerified,
   subscription: user.subscription,
 });
