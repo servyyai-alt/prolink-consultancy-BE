@@ -6,6 +6,7 @@ const ContactInquiry = require('../models/ContactInquiry');
 const Blog = require('../models/Blog');
 const Service = require('../models/Service');
 const Testimonial = require('../models/Testimonial');
+const Notification = require('../models/Notification');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
 
 const ADMIN_CREATABLE_ROLES = ['admin', 'recruiter', 'employer', 'job_seeker'];
@@ -220,6 +221,35 @@ exports.changeUserRole = async (req, res, next) => {
   }
 };
 
+// @DELETE /api/v1/admin/users/:id
+exports.deleteUser = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return sendError(res, 404, 'User not found.');
+    if (user.role === 'super_admin') return sendError(res, 403, 'Cannot delete super admin.');
+    if (user._id.toString() === req.user._id.toString()) return sendError(res, 403, 'You cannot delete your own account.');
+
+    await Promise.all([
+      Job.updateMany(
+        { postedBy: user._id, isDeleted: false },
+        { $set: { isDeleted: true, deletedAt: new Date(), status: 'closed' } }
+      ),
+      Application.deleteMany({
+        $or: [{ applicant: user._id }, { employer: user._id }],
+      }),
+      Payment.deleteMany({ user: user._id }),
+      Blog.deleteMany({ author: user._id }),
+      Testimonial.deleteMany({ user: user._id }),
+      Notification.deleteMany({ user: user._id }),
+      User.findByIdAndDelete(user._id),
+    ]);
+
+    sendSuccess(res, 200, 'User deleted successfully.');
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @GET /api/v1/admin/contacts
 exports.getContacts = async (req, res, next) => {
   try {
@@ -369,11 +399,19 @@ exports.getServices = async (req, res, next) => {
 // @GET /api/v1/admin/testimonials
 exports.getTestimonials = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, approval } = req.query;
+    const { page = 1, limit = 20, approval, search } = req.query;
     const query = {};
 
     if (approval === 'approved') query.isApproved = true;
     if (approval === 'pending') query.isApproved = false;
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, 'i') },
+        { designation: new RegExp(search, 'i') },
+        { company: new RegExp(search, 'i') },
+        { content: new RegExp(search, 'i') },
+      ];
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [testimonials, total] = await Promise.all([
@@ -399,6 +437,36 @@ exports.approveTestimonial = async (req, res, next) => {
     const t = await Testimonial.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true });
     if (!t) return sendError(res, 404, 'Testimonial not found.');
     sendSuccess(res, 200, 'Testimonial approved.', { data: { testimonial: t } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @PATCH /api/v1/admin/testimonials/:id
+exports.updateTestimonial = async (req, res, next) => {
+  try {
+    const allowed = ['name', 'designation', 'company', 'content', 'rating', 'isFeatured', 'order', 'isApproved'];
+    const updates = {};
+
+    Object.keys(req.body || {}).forEach((key) => {
+      if (allowed.includes(key)) updates[key] = req.body[key];
+    });
+
+    const t = await Testimonial.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    if (!t) return sendError(res, 404, 'Testimonial not found.');
+    sendSuccess(res, 200, 'Testimonial updated.', { data: { testimonial: t } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @DELETE /api/v1/admin/testimonials/:id
+exports.deleteTestimonial = async (req, res, next) => {
+  try {
+    const t = await Testimonial.findById(req.params.id);
+    if (!t) return sendError(res, 404, 'Testimonial not found.');
+    await Testimonial.findByIdAndDelete(req.params.id);
+    sendSuccess(res, 200, 'Testimonial deleted.');
   } catch (error) {
     next(error);
   }

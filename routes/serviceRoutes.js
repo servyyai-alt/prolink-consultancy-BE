@@ -28,8 +28,12 @@ router.post('/', protect, authorize('admin', 'super_admin'), async (req, res, ne
 
 router.put('/:id', protect, authorize('admin', 'super_admin'), async (req, res, next) => {
   try {
-    const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const service = await Service.findById(req.params.id);
     if (!service) return sendError(res, 404, 'Service not found.');
+
+    Object.assign(service, req.body);
+    await service.save();
+
     sendSuccess(res, 200, 'Service updated.', { data: { service } });
   } catch (e) { next(e); }
 });
