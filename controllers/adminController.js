@@ -6,7 +6,61 @@ const ContactInquiry = require('../models/ContactInquiry');
 const Blog = require('../models/Blog');
 const Service = require('../models/Service');
 const Testimonial = require('../models/Testimonial');
+const Notification = require('../models/Notification');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
+
+const ADMIN_CREATABLE_ROLES = ['admin', 'recruiter', 'employer', 'job_seeker'];
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
+
+const cleanString = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const buildUserPayload = (body = {}) => {
+  const firstName = cleanString(body.firstName);
+  const lastName = cleanString(body.lastName);
+  const email = cleanString(body.email).toLowerCase();
+  const phone = cleanString(body.phone);
+  const password = body.password || '';
+  const role = cleanString(body.role);
+  const companyName = cleanString(body.companyName);
+  const companyWebsite = cleanString(body.companyWebsite);
+  const companyDescription = cleanString(body.companyDescription);
+  const companyLocation = cleanString(body.companyLocation);
+
+  const errors = {};
+
+  if (!firstName || firstName.length < 2) errors.firstName = 'First name must be at least 2 characters.';
+  if (!lastName || lastName.length < 2) errors.lastName = 'Last name must be at least 2 characters.';
+  if (!email || !EMAIL_REGEX.test(email)) errors.email = 'Enter a valid email address.';
+  if (phone && !INDIAN_MOBILE_REGEX.test(phone)) errors.phone = 'Enter a valid 10-digit Indian mobile number.';
+  if (!password || password.length < 8) errors.password = 'Password must be at least 8 characters.';
+  if (!ADMIN_CREATABLE_ROLES.includes(role)) errors.role = 'Select a valid role.';
+
+  if (role === 'employer') {
+    if (!companyName || companyName.length < 2) errors.companyName = 'Company name is required for employer users.';
+    if (!companyDescription || companyDescription.length < 20) errors.companyDescription = 'Company description must be at least 20 characters.';
+  }
+
+  return {
+    errors,
+    data: {
+      firstName,
+      lastName,
+      email,
+      phone: phone || undefined,
+      password,
+      role,
+      company: role === 'employer'
+        ? {
+            name: companyName,
+            website: companyWebsite || undefined,
+            description: companyDescription,
+            location: companyLocation || undefined,
+          }
+        : undefined,
+    },
+  };
+};
 
 // @GET /api/v1/admin/dashboard-stats
 exports.getDashboardStats = async (req, res, next) => {
@@ -101,6 +155,42 @@ exports.getUsers = async (req, res, next) => {
   }
 };
 
+// @POST /api/v1/admin/users
+exports.createUser = async (req, res, next) => {
+  try {
+    const { errors, data } = buildUserPayload(req.body);
+
+    if (Object.keys(errors).length > 0) {
+      return sendError(res, 400, 'Please correct the highlighted fields.', errors);
+    }
+
+    const existingUser = await User.findOne({ email: data.email });
+    if (existingUser) {
+      return sendError(res, 409, 'Email already registered.', { email: 'This email is already in use.' });
+    }
+
+    const user = await User.create({
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      phone: data.phone,
+      password: data.password,
+      role: data.role,
+      isVerified: true,
+      createdBy: req.user._id,
+      ...(data.company ? { company: data.company } : {}),
+    });
+
+    sendSuccess(res, 201, 'User created successfully.', {
+      data: {
+        user,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @PATCH /api/v1/admin/users/:id/block
 exports.toggleBlockUser = async (req, res, next) => {
   try {
@@ -126,6 +216,35 @@ exports.changeUserRole = async (req, res, next) => {
     const user = await User.findByIdAndUpdate(req.params.id, { role }, { new: true });
     if (!user) return sendError(res, 404, 'User not found.');
     sendSuccess(res, 200, 'Role updated.', { data: { user } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @DELETE /api/v1/admin/users/:id
+exports.deleteUser = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return sendError(res, 404, 'User not found.');
+    if (user.role === 'super_admin') return sendError(res, 403, 'Cannot delete super admin.');
+    if (user._id.toString() === req.user._id.toString()) return sendError(res, 403, 'You cannot delete your own account.');
+
+    await Promise.all([
+      Job.updateMany(
+        { postedBy: user._id, isDeleted: false },
+        { $set: { isDeleted: true, deletedAt: new Date(), status: 'closed' } }
+      ),
+      Application.deleteMany({
+        $or: [{ applicant: user._id }, { employer: user._id }],
+      }),
+      Payment.deleteMany({ user: user._id }),
+      Blog.deleteMany({ author: user._id }),
+      Testimonial.deleteMany({ user: user._id }),
+      Notification.deleteMany({ user: user._id }),
+      User.findByIdAndDelete(user._id),
+    ]);
+
+    sendSuccess(res, 200, 'User deleted successfully.');
   } catch (error) {
     next(error);
   }
@@ -280,11 +399,19 @@ exports.getServices = async (req, res, next) => {
 // @GET /api/v1/admin/testimonials
 exports.getTestimonials = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, approval } = req.query;
+    const { page = 1, limit = 20, approval, search } = req.query;
     const query = {};
 
     if (approval === 'approved') query.isApproved = true;
     if (approval === 'pending') query.isApproved = false;
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, 'i') },
+        { designation: new RegExp(search, 'i') },
+        { company: new RegExp(search, 'i') },
+        { content: new RegExp(search, 'i') },
+      ];
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [testimonials, total] = await Promise.all([
@@ -310,6 +437,36 @@ exports.approveTestimonial = async (req, res, next) => {
     const t = await Testimonial.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true });
     if (!t) return sendError(res, 404, 'Testimonial not found.');
     sendSuccess(res, 200, 'Testimonial approved.', { data: { testimonial: t } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @PATCH /api/v1/admin/testimonials/:id
+exports.updateTestimonial = async (req, res, next) => {
+  try {
+    const allowed = ['name', 'designation', 'company', 'content', 'rating', 'isFeatured', 'order', 'isApproved'];
+    const updates = {};
+
+    Object.keys(req.body || {}).forEach((key) => {
+      if (allowed.includes(key)) updates[key] = req.body[key];
+    });
+
+    const t = await Testimonial.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    if (!t) return sendError(res, 404, 'Testimonial not found.');
+    sendSuccess(res, 200, 'Testimonial updated.', { data: { testimonial: t } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @DELETE /api/v1/admin/testimonials/:id
+exports.deleteTestimonial = async (req, res, next) => {
+  try {
+    const t = await Testimonial.findById(req.params.id);
+    if (!t) return sendError(res, 404, 'Testimonial not found.');
+    await Testimonial.findByIdAndDelete(req.params.id);
+    sendSuccess(res, 200, 'Testimonial deleted.');
   } catch (error) {
     next(error);
   }
