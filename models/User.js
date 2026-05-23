@@ -19,6 +19,8 @@ const userSchema = new mongoose.Schema(
     avatar:    { url: String, public_id: String },
     isActive:  { type: Boolean, default: true },
     isVerified:{ type: Boolean, default: false },
+    // Admin approval for employer accounts (required to post jobs)
+    isApproved: { type: Boolean, default: false },
     isBlocked: { type: Boolean, default: false },
 
     // Profile details

@@ -190,6 +190,10 @@ exports.getJobBySlug = async (req, res, next) => {
 // @POST /api/v1/jobs  - Employer/Admin
 exports.createJob = async (req, res, next) => {
   try {
+    // Only allow posting if employer is approved by admin
+    if (req.user.role === 'employer' && !req.user.isApproved) {
+      return sendError(res, 403, 'Your account is not approved to post jobs. Please contact an administrator.')
+    }
     const { errors, data } = validateJobPayload(req.body, req.user);
 
     if (Object.keys(errors).length > 0) {

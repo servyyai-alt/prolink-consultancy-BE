@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
-  getDashboardStats, getUsers, createUser, toggleBlockUser, changeUserRole, deleteUser,
+  getDashboardStats, getUsers, createUser, toggleBlockUser, changeUserRole, deleteUser, approveUser,
   getContacts, getPayments, getApplications, getBlogs, getServices, getTestimonials, approveTestimonial, updateTestimonial,deleteTestimonial
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middlewares/auth');
@@ -13,6 +13,7 @@ router.get('/users', ...adminOnly, getUsers);
 router.post('/users', ...adminOnly, createUser);
 router.patch('/users/:id/block', ...adminOnly, toggleBlockUser);
 router.patch('/users/:id/role', ...adminOnly, changeUserRole);
+router.patch('/users/:id/approve', ...adminOnly, approveUser);
 router.delete('/users/:id', ...adminOnly, deleteUser);
 router.get('/contacts', ...adminOnly, getContacts);
 router.get('/payments', ...adminOnly, getPayments);
