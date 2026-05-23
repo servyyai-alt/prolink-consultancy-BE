@@ -2,9 +2,66 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middlewares/auth');
 const User = require('../models/User');
-const { uploadToCloudinary } = require('../config/cloudinary');
+const { cloudinary, uploadToCloudinary } = require('../config/cloudinary');
 const { imageUpload, resumeUpload } = require('../middlewares/upload');
 const { sendSuccess, sendError } = require('../utils/response');
+const fs = require('fs');
+
+const copyAllowed = (target, source, allowedFields, prefix = '') => {
+  if (!source || typeof source !== 'object') return;
+
+  allowedFields.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(source, field)) {
+      target[prefix ? `${prefix}.${field}` : field] = source[field];
+    }
+  });
+};
+
+const getProfileUpdates = (body) => {
+  const set = {};
+  const unset = {};
+
+  copyAllowed(set, body, ['firstName', 'lastName', 'phone']);
+  copyAllowed(set, body.profile, [
+    'headline',
+    'summary',
+    'location',
+    'website',
+    'linkedin',
+    'github',
+    'skills',
+    'experience',
+    'education',
+    'languages',
+  ], 'profile');
+
+  if (body.profile && Object.prototype.hasOwnProperty.call(body.profile, 'availability')) {
+    if (body.profile.availability) {
+      set['profile.availability'] = body.profile.availability;
+    } else {
+      unset['profile.availability'] = '';
+    }
+  }
+
+  copyAllowed(set, body.company, [
+    'name',
+    'website',
+    'industry',
+    'size',
+    'description',
+    'location',
+    'gstin',
+  ], 'company');
+
+  const update = {};
+  if (Object.keys(set).length) update.$set = set;
+  if (Object.keys(unset).length) update.$unset = unset;
+  return update;
+};
+
+const cleanupFile = (file) => {
+  if (file?.path) fs.unlink(file.path, () => {});
+};
 
 router.get('/profile', protect, async (req, res) => {
   const user = await User.findById(req.user._id);
@@ -13,9 +70,8 @@ router.get('/profile', protect, async (req, res) => {
 
 router.put('/profile', protect, async (req, res, next) => {
   try {
-    const updates = req.body;
-    delete updates.password; delete updates.role; delete updates.email;
-    const user = await User.findByIdAndUpdate(req.user._id, { $set: updates }, { new: true, runValidators: true });
+    const update = getProfileUpdates(req.body);
+    const user = await User.findByIdAndUpdate(req.user._id, update, { new: true, runValidators: true });
     sendSuccess(res, 200, 'Profile updated.', { data: { user } });
   } catch (e) { next(e); }
 });
@@ -35,18 +91,47 @@ router.post('/upload-avatar', protect, imageUpload.single('avatar'), async (req,
   try {
     if (!req.file) return sendError(res, 400, 'No file uploaded.');
     const result = await uploadToCloudinary(req.file.path, 'prolink/avatars', { width: 300, height: 300, crop: 'fill' });
-    await User.findByIdAndUpdate(req.user._id, { avatar: result });
-    sendSuccess(res, 200, 'Avatar uploaded.', { data: { avatar: result } });
-  } catch (e) { next(e); }
+    cleanupFile(req.file);
+    const user = await User.findByIdAndUpdate(req.user._id, { avatar: result }, { new: true });
+    sendSuccess(res, 200, 'Avatar uploaded.', { data: { avatar: result, user } });
+  } catch (e) {
+    cleanupFile(req.file);
+    next(e);
+  }
+});
+
+router.post('/upload-company-logo', protect, imageUpload.single('logo'), async (req, res, next) => {
+  try {
+    if (!req.file) return sendError(res, 400, 'No file uploaded.');
+    const result = await uploadToCloudinary(req.file.path, 'prolink/company-logos', { width: 300, height: 300, crop: 'fill' });
+    cleanupFile(req.file);
+    const user = await User.findByIdAndUpdate(req.user._id, { 'company.logo': result }, { new: true });
+    sendSuccess(res, 200, 'Company logo uploaded.', { data: { logo: result, user } });
+  } catch (e) {
+    cleanupFile(req.file);
+    next(e);
+  }
 });
 
 router.post('/upload-resume', protect, resumeUpload.single('resume'), async (req, res, next) => {
   try {
     if (!req.file) return sendError(res, 400, 'No file uploaded.');
-    const result = await uploadToCloudinary(req.file.path, 'prolink/resumes', { resource_type: 'raw' });
-    await User.findByIdAndUpdate(req.user._id, { 'profile.resume': { ...result, uploadedAt: new Date() } });
-    sendSuccess(res, 200, 'Resume uploaded.', { data: { resume: result } });
-  } catch (e) { next(e); }
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: 'raw',
+      folder: 'prolink/resumes',
+    });
+    cleanupFile(req.file);
+    const resume = {
+      url: result.secure_url,
+      public_id: result.public_id,
+      uploadedAt: new Date(),
+    };
+    const user = await User.findByIdAndUpdate(req.user._id, { 'profile.resume': resume }, { new: true });
+    sendSuccess(res, 200, 'Resume uploaded.', { data: { resume, user } });
+  } catch (e) {
+    cleanupFile(req.file);
+    next(e);
+  }
 });
 
 router.post('/save-job/:jobId', protect, async (req, res, next) => {
