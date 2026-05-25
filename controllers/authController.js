@@ -5,6 +5,15 @@ const { generateTokenPair, verifyRefreshToken, generateAccessToken } = require('
 const { sendTemplateEmail } = require('../utils/emailService');
 
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
+const runInBackground = (task) => {
+  setImmediate(async () => {
+    try {
+      await task();
+    } catch (error) {
+      console.error('Background task failed:', error.message);
+    }
+  });
+};
 
 // @POST /api/v1/auth/register
 exports.register = async (req, res, next) => {
@@ -33,15 +42,11 @@ exports.register = async (req, res, next) => {
     const otp = user.generateOTP();
     await user.save();
 
-    try {
-      await sendTemplateEmail(email, 'otp', otp, firstName);
-    } catch (emailErr) {
-      console.error('OTP email failed:', emailErr.message);
-    }
-
     sendSuccess(res, 201, 'Registration successful. Please verify your email.', {
       data: { userId: user._id, email: user.email },
     });
+
+    runInBackground(() => sendTemplateEmail(email, 'otp', otp, firstName));
   } catch (error) {
     next(error);
   }
@@ -218,6 +223,8 @@ const sanitizeUser = (user) => ({
   phone: user.phone,
   role: user.role,
   avatar: user.avatar,
+  profile: user.profile,
+  company: user.company,
   isVerified: user.isVerified,
   subscription: user.subscription,
 });
