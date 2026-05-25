@@ -4,10 +4,23 @@ const { sendSuccess, sendError } = require('../utils/response');
 const { generateTokenPair, verifyRefreshToken, generateAccessToken } = require('../utils/tokens');
 const { sendTemplateEmail } = require('../utils/emailService');
 
+const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
+
 // @POST /api/v1/auth/register
 exports.register = async (req, res, next) => {
   try {
     const { firstName, lastName, email, password, phone, role } = req.body;
+    const normalizedPhone = `${phone || ''}`.trim();
+
+    if (!normalizedPhone) {
+      return sendError(res, 400, 'Phone number is required.', { phone: 'Phone number is required.' });
+    }
+
+    if (!INDIAN_MOBILE_REGEX.test(normalizedPhone)) {
+      return sendError(res, 400, 'Enter a valid 10-digit Indian mobile number.', {
+        phone: 'Enter a valid 10-digit Indian mobile number.',
+      });
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) return sendError(res, 409, 'Email already registered.');
@@ -15,7 +28,7 @@ exports.register = async (req, res, next) => {
     const allowedRoles = ['job_seeker', 'employer'];
     const userRole = allowedRoles.includes(role) ? role : 'job_seeker';
 
-    const user = await User.create({ firstName, lastName, email, password, phone, role: userRole });
+    const user = await User.create({ firstName, lastName, email, password, phone: normalizedPhone, role: userRole });
 
     const otp = user.generateOTP();
     await user.save();
