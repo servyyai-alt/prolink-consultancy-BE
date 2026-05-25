@@ -12,6 +12,7 @@ const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
 const ADMIN_CREATABLE_ROLES = ['admin', 'recruiter', 'employer', 'job_seeker'];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
+const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const cleanString = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -362,10 +363,22 @@ exports.getBlogs = async (req, res, next) => {
     if (status) query.status = status;
     if (category) query.category = category;
     if (search) {
+      const regex = new RegExp(escapeRegex(search.trim()), 'i');
+      const authors = await User.find({
+        $or: [
+          { firstName: regex },
+          { lastName: regex },
+          { email: regex },
+        ],
+      }).select('_id');
+
       query.$or = [
-        { title: new RegExp(search, 'i') },
-        { excerpt: new RegExp(search, 'i') },
-        { tags: { $in: [new RegExp(search, 'i')] } },
+        { title: regex },
+        { excerpt: regex },
+        { category: regex },
+        { content: regex },
+        { tags: { $in: [regex] } },
+        { author: { $in: authors.map((author) => author._id) } },
       ];
     }
 
@@ -373,6 +386,7 @@ exports.getBlogs = async (req, res, next) => {
     const [blogs, total] = await Promise.all([
       Blog.find(query)
         .populate('author', 'firstName lastName email')
+        .populate('relatedPosts', 'title slug')
         .sort('-createdAt')
         .skip(skip)
         .limit(parseInt(limit)),
