@@ -2,7 +2,7 @@ const Application = require('../models/Application');
 const Job = require('../models/Job');
 const Notification = require('../models/Notification');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
-const { sendTemplateEmail } = require('../utils/emailService');
+const { sendInBackground, sendTemplateEmail } = require('../utils/emailService');
 
 // @POST /api/v1/applications  - Job Seeker
 exports.applyForJob = async (req, res, next) => {
@@ -38,11 +38,12 @@ exports.applyForJob = async (req, res, next) => {
       link: `/dashboard/applications/${application._id}`,
     });
 
-    try {
-      await sendTemplateEmail(req.user.email, 'applicationReceived', req.user.firstName, job.title);
-    } catch (_) {}
-
     sendSuccess(res, 201, 'Application submitted successfully.', { data: { application } });
+
+    sendInBackground(
+      () => sendTemplateEmail(req.user.email, 'applicationReceived', req.user.firstName, job.title),
+      'Application confirmation email'
+    );
   } catch (error) {
     next(error);
   }
