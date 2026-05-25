@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const ContactInquiry = require('../models/ContactInquiry');
 const { sendSuccess } = require('../utils/response');
-const { sendEmail } = require('../utils/emailService');
+const { sendEmail, sendInBackground } = require('../utils/emailService');
 
 router.post('/', async (req, res, next) => {
   try {
@@ -11,14 +11,15 @@ router.post('/', async (req, res, next) => {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });
-    try {
-      await sendEmail({
+    sendSuccess(res, 201, 'Inquiry submitted. We will get back to you soon.', { data: { inquiry } });
+    sendInBackground(
+      () => sendEmail({
         to: process.env.EMAIL_USER,
         subject: `New Contact Inquiry: ${req.body.subject}`,
         html: `<p>From: ${req.body.name} (${req.body.email})</p><p>Service: ${req.body.service}</p><p>${req.body.message}</p>`,
-      });
-    } catch (_) {}
-    sendSuccess(res, 201, 'Inquiry submitted. We will get back to you soon.', { data: { inquiry } });
+      }),
+      'Contact inquiry email'
+    );
   } catch (e) { next(e); }
 });
 

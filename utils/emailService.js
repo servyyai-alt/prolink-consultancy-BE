@@ -21,6 +21,16 @@ const sendEmail = async ({ to, subject, html, text }) => {
   return transporter.sendMail(mailOptions);
 };
 
+const sendInBackground = (task, label = 'Email task') => {
+  setImmediate(async () => {
+    try {
+      await task();
+    } catch (error) {
+      console.error(`${label} failed:`, error.message);
+    }
+  });
+};
+
 // Email templates
 const emailTemplates = {
   otp: (otp, name) => ({
@@ -95,4 +105,4 @@ const sendTemplateEmail = async (to, template, ...args) => {
   return sendEmail({ to, subject, html });
 };
 
-module.exports = { sendEmail, sendTemplateEmail, emailTemplates };
+module.exports = { sendEmail, sendInBackground, sendTemplateEmail, emailTemplates };

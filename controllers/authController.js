@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const { sendSuccess, sendError } = require('../utils/response');
 const { generateTokenPair, verifyRefreshToken, generateAccessToken } = require('../utils/tokens');
-const { sendTemplateEmail } = require('../utils/emailService');
+const { sendInBackground, sendTemplateEmail } = require('../utils/emailService');
 
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
 
@@ -33,15 +33,11 @@ exports.register = async (req, res, next) => {
     const otp = user.generateOTP();
     await user.save();
 
-    try {
-      await sendTemplateEmail(email, 'otp', otp, firstName);
-    } catch (emailErr) {
-      console.error('OTP email failed:', emailErr.message);
-    }
-
     sendSuccess(res, 201, 'Registration successful. Please verify your email.', {
       data: { userId: user._id, email: user.email },
     });
+
+    sendInBackground(() => sendTemplateEmail(email, 'otp', otp, firstName), 'Registration OTP email');
   } catch (error) {
     next(error);
   }
@@ -65,11 +61,11 @@ exports.verifyOTP = async (req, res, next) => {
     user.refreshToken = refreshToken;
     await user.save();
 
-    try { await sendTemplateEmail(email, 'welcomeEmail', user.firstName); } catch (_) {}
-
     sendSuccess(res, 200, 'Email verified successfully.', {
       data: { accessToken, refreshToken, user: sanitizeUser(user) },
     });
+
+    sendInBackground(() => sendTemplateEmail(email, 'welcomeEmail', user.firstName), 'Welcome email');
   } catch (error) {
     next(error);
   }
@@ -136,11 +132,9 @@ exports.forgotPassword = async (req, res, next) => {
     await user.save();
 
     const resetLink = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
-    try {
-      await sendTemplateEmail(email, 'passwordReset', resetLink, user.firstName);
-    } catch (_) {}
-
     sendSuccess(res, 200, 'If this email exists, a reset link has been sent.');
+
+    sendInBackground(() => sendTemplateEmail(email, 'passwordReset', resetLink, user.firstName), 'Password reset email');
   } catch (error) {
     next(error);
   }
@@ -183,8 +177,9 @@ exports.resendOTP = async (req, res, next) => {
     const otp = user.generateOTP();
     await user.save();
 
-    await sendTemplateEmail(email, 'otp', otp, user.firstName);
     sendSuccess(res, 200, 'OTP resent successfully.');
+
+    sendInBackground(() => sendTemplateEmail(email, 'otp', otp, user.firstName), 'Resend OTP email');
   } catch (error) {
     next(error);
   }
