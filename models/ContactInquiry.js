@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const contactInquirySchema = new mongoose.Schema(
   {
+    user:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     name:    { type: String, required: true },
     email:   { type: String, required: true },
     phone:   String,
@@ -15,6 +16,15 @@ const contactInquirySchema = new mongoose.Schema(
     repliedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     repliedAt: Date,
     reply:     String,
+    internalNotes: String,
+    statusHistory: [
+      {
+        status: { type: String, enum: ['new', 'read', 'replied', 'closed'] },
+        note: String,
+        changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        changedAt: { type: Date, default: Date.now },
+      },
+    ],
     isSpam:    { type: Boolean, default: false },
   },
   { timestamps: true }

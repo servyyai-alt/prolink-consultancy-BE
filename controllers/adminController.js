@@ -6,13 +6,21 @@ const ContactInquiry = require('../models/ContactInquiry');
 const Blog = require('../models/Blog');
 const Service = require('../models/Service');
 const Testimonial = require('../models/Testimonial');
+const TeamMember = require('../models/TeamMember');
 const Notification = require('../models/Notification');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
+const { sendEmail, sendInBackground } = require('../utils/emailService');
 
 const ADMIN_CREATABLE_ROLES = ['admin', 'recruiter', 'employer', 'job_seeker'];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
 const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeHtml = (value = '') => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 const cleanString = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -270,16 +278,133 @@ exports.deleteUser = async (req, res, next) => {
 // @GET /api/v1/admin/contacts
 exports.getContacts = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status, search } = req.query;
     const query = {};
     if (status) query.status = status;
+    if (search) {
+      const regex = new RegExp(escapeRegex(search.trim()), 'i');
+      query.$or = [
+        { name: regex },
+        { email: regex },
+        { subject: regex },
+        { message: regex },
+        { service: regex },
+      ];
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [contacts, total] = await Promise.all([
-      ContactInquiry.find(query).sort('-createdAt').skip(skip).limit(parseInt(limit)),
+      ContactInquiry.find(query)
+        .populate('user', 'firstName lastName email')
+        .populate('repliedBy', 'firstName lastName email')
+        .sort('-createdAt')
+        .skip(skip)
+        .limit(parseInt(limit)),
       ContactInquiry.countDocuments(query),
     ]);
     sendPaginated(res, contacts, total, page, limit);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @PATCH /api/v1/admin/contacts/:id
+exports.updateContact = async (req, res, next) => {
+  try {
+    const { status, reply, internalNotes, isSpam } = req.body || {};
+    const allowedStatuses = ['new', 'read', 'replied', 'closed'];
+
+    const inquiry = await ContactInquiry.findById(req.params.id);
+    if (!inquiry) return sendError(res, 404, 'Contact inquiry not found.');
+
+    const hasReply = typeof reply === 'string' && reply.trim().length > 0;
+    const nextStatus = status || (hasReply ? 'replied' : inquiry.status);
+
+    if (!allowedStatuses.includes(nextStatus)) {
+      return sendError(res, 400, 'Invalid contact inquiry status.');
+    }
+
+    const statusChanged = inquiry.status !== nextStatus;
+    const replyChanged = typeof reply === 'string' && reply.trim() !== (inquiry.reply || '');
+
+    inquiry.status = nextStatus;
+
+    if (typeof internalNotes === 'string') inquiry.internalNotes = internalNotes.trim();
+    if (typeof isSpam === 'boolean') inquiry.isSpam = isSpam;
+
+    if (hasReply) {
+      inquiry.reply = reply.trim();
+      inquiry.repliedBy = req.user._id;
+      inquiry.repliedAt = new Date();
+    }
+
+    if (statusChanged || replyChanged) {
+      inquiry.statusHistory.push({
+        status: nextStatus,
+        note: replyChanged ? 'Admin replied to inquiry' : `Status changed to ${nextStatus}`,
+        changedBy: req.user._id,
+      });
+    }
+
+    await inquiry.save();
+
+    let notification = null;
+    if (inquiry.user && (statusChanged || replyChanged)) {
+      notification = await Notification.create({
+        recipient: inquiry.user,
+        sender: req.user._id,
+        type: 'contact_inquiry_update',
+        title: 'Contact Request Updated',
+        message: replyChanged
+          ? `Your contact request "${inquiry.subject}" has a new reply from our team.`
+          : `Your contact request "${inquiry.subject}" is now marked as ${nextStatus}.`,
+        link: '/dashboard/contact-requests',
+        data: {
+          inquiryId: inquiry._id.toString(),
+          status: nextStatus,
+        },
+      });
+
+      req.app.get('io')?.sendNotification?.(String(inquiry.user), notification);
+    }
+
+    if (statusChanged || replyChanged) {
+      const safeName = escapeHtml(inquiry.name);
+      const safeSubject = escapeHtml(inquiry.subject);
+      const safeReply = escapeHtml(inquiry.reply);
+
+      sendInBackground(
+        () => sendEmail({
+          to: inquiry.email,
+          subject: `Update on your ProLink inquiry: ${inquiry.subject}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 32px; background: #f8fafc;">
+              <div style="background: white; border-radius: 16px; padding: 32px; border: 1px solid #e2e8f0;">
+                <h2 style="margin: 0 0 12px; color: #0f172a;">Your inquiry has been updated</h2>
+                <p style="margin: 0 0 16px; color: #475569; line-height: 1.7;">
+                  Hello ${safeName}, your inquiry about <strong>${safeSubject}</strong> is now
+                  <strong style="text-transform: capitalize;">${nextStatus}</strong>.
+                </p>
+                ${replyChanged ? `
+                  <div style="margin: 24px 0; padding: 20px; background: #fff7ed; border: 1px solid #fdba74; border-radius: 12px;">
+                    <p style="margin: 0 0 8px; font-weight: 700; color: #9a3412;">Reply from ProLink</p>
+                    <p style="margin: 0; color: #431407; white-space: pre-wrap; line-height: 1.7;">${safeReply}</p>
+                  </div>
+                ` : ''}
+                <p style="margin: 0; color: #64748b; line-height: 1.7;">
+                  ${inquiry.user
+                    ? `You can also review this update in your dashboard at ${process.env.CLIENT_URL}/dashboard/contact-requests.`
+                    : 'If you have more questions, you can reply with a new contact request anytime.'}
+                </p>
+              </div>
+            </div>
+          `,
+        }),
+        'Contact inquiry update email'
+      );
+    }
+
+    sendSuccess(res, 200, 'Contact inquiry updated.', { data: { inquiry, notification } });
   } catch (error) {
     next(error);
   }
@@ -386,6 +511,7 @@ exports.getBlogs = async (req, res, next) => {
     const [blogs, total] = await Promise.all([
       Blog.find(query)
         .populate('author', 'firstName lastName email')
+        .populate('comments.user', 'firstName lastName avatar email')
         .populate('relatedPosts', 'title slug')
         .sort('-createdAt')
         .skip(skip)
@@ -421,6 +547,33 @@ exports.getServices = async (req, res, next) => {
     ]);
 
     sendPaginated(res, services, total, page, limit);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @GET /api/v1/admin/team-members
+exports.getTeamMembers = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, search, isActive } = req.query;
+    const query = {};
+
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, 'i') },
+        { role: new RegExp(search, 'i') },
+        { bio: new RegExp(search, 'i') },
+      ];
+    }
+    if (isActive !== undefined && isActive !== '') query.isActive = isActive === 'true';
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [teamMembers, total] = await Promise.all([
+      TeamMember.find(query).sort({ order: 1, createdAt: -1 }).skip(skip).limit(parseInt(limit)),
+      TeamMember.countDocuments(query),
+    ]);
+
+    sendPaginated(res, teamMembers, total, page, limit);
   } catch (error) {
     next(error);
   }

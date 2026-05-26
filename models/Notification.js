@@ -10,7 +10,7 @@ const notificationSchema = new mongoose.Schema(
         'job_application', 'application_status', 'interview_scheduled',
         'offer_received', 'job_posted', 'profile_viewed', 'message',
         'payment_success', 'payment_failed', 'account_verified',
-        'password_changed', 'system', 'promotion',
+        'password_changed', 'contact_inquiry_update', 'system', 'promotion',
       ],
       required: true,
     },

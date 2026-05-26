@@ -44,6 +44,13 @@ exports.applyForJob = async (req, res, next) => {
       employer: job.postedBy._id,
       resume,
       coverLetter,
+      statusHistory: [
+        {
+          status: 'applied',
+          changedBy: req.user._id,
+          note: 'Application submitted successfully.',
+        },
+      ],
     });
 
     await Job.findByIdAndUpdate(jobId, { $inc: { applications: 1 } });
@@ -80,6 +87,7 @@ exports.getMyApplications = async (req, res, next) => {
     const [applications, total] = await Promise.all([
       Application.find(query)
         .populate('job', 'title company location type salary slug status')
+        .populate('statusHistory.changedBy', 'firstName lastName role')
         .sort('-createdAt')
         .skip(skip)
         .limit(parseInt(limit)),
@@ -141,12 +149,12 @@ exports.updateApplicationStatus = async (req, res, next) => {
       return sendError(res, 400, 'Please use schedule interview to set the interview date and time.');
     }
 
-    application.statusHistory.push({ status: application.status, changedBy: req.user._id, note });
     application.status = status;
+    application.statusHistory.push({ status, changedBy: req.user._id, note });
     await application.save();
 
     // Notify applicant
-    await Notification.create({
+    const notification = await Notification.create({
       recipient: application.applicant._id,
       sender: req.user._id,
       type: 'application_status',
@@ -154,6 +162,8 @@ exports.updateApplicationStatus = async (req, res, next) => {
       message: `Your application for ${application.job.title} is now ${status.replace(/_/g, ' ')}.`,
       link: `/dashboard/applications`,
     });
+
+    req.app.get('io')?.sendNotification?.(String(application.applicant._id), notification);
 
     sendSuccess(res, 200, 'Application status updated.', { data: { application } });
   } catch (error) {
@@ -172,6 +182,11 @@ exports.withdrawApplication = async (req, res, next) => {
     }
     application.status = 'withdrawn';
     application.withdrawnReason = reason;
+    application.statusHistory.push({
+      status: 'withdrawn',
+      changedBy: req.user._id,
+      note: reason || 'Application withdrawn by candidate.',
+    });
     await application.save();
     sendSuccess(res, 200, 'Application withdrawn.');
   } catch (error) {
@@ -202,13 +217,17 @@ exports.scheduleInterview = async (req, res, next) => {
       return sendError(res, 400, 'Select a valid interview type.');
     }
 
-    application.statusHistory.push({ status: application.status, changedBy: req.user._id, note: 'Interview scheduled' });
     application.interview = { scheduledAt: interviewDate, type: type || 'video', link, location, notes };
     application.status = 'interview_scheduled';
+    application.statusHistory.push({
+      status: 'interview_scheduled',
+      changedBy: req.user._id,
+      note: notes || 'Interview scheduled.',
+    });
     await application.save();
 
     // Notify applicant
-    await Notification.create({
+    const notification = await Notification.create({
       recipient: application.applicant._id,
       sender: req.user._id,
       type: 'interview_scheduled',
@@ -216,6 +235,8 @@ exports.scheduleInterview = async (req, res, next) => {
       message: `Interview scheduled for ${application.job.title} on ${interviewDate.toLocaleString()}`,
       link: '/dashboard/interviews',
     });
+
+    req.app.get('io')?.sendNotification?.(String(application.applicant._id), notification);
 
     sendSuccess(res, 200, 'Interview scheduled.', { data: { application } });
   } catch (error) {
