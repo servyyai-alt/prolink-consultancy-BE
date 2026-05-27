@@ -4,6 +4,21 @@ const Testimonial = require('../models/Testimonial');
 const { protect } = require('../middlewares/auth');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 
+const formatTestimonial = (testimonial) => {
+  const item = testimonial.toObject ? testimonial.toObject() : testimonial;
+  const userAvatar = item.user?.avatar?.url
+    ? {
+        url: item.user.avatar.url,
+        public_id: item.user.avatar.public_id || '',
+      }
+    : null;
+
+  return {
+    ...item,
+    avatar: item.avatar?.url ? item.avatar : userAvatar,
+  };
+};
+
 router.get('/', async (req, res, next) => {
   try {
     const { page = 1, limit = 9, featured } = req.query;
@@ -11,10 +26,15 @@ router.get('/', async (req, res, next) => {
     if (featured === 'true') query.isFeatured = true;
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [testimonials, total] = await Promise.all([
-      Testimonial.find(query).sort('order -createdAt').skip(skip).limit(parseInt(limit)),
+      Testimonial.find(query)
+        .populate('service', 'name slug')
+        .populate('user', 'firstName lastName avatar')
+        .sort('order -createdAt')
+        .skip(skip)
+        .limit(parseInt(limit)),
       Testimonial.countDocuments(query),
     ]);
-    sendPaginated(res, testimonials, total, page, limit);
+    sendPaginated(res, testimonials.map(formatTestimonial), total, page, limit);
   } catch (e) { next(e); }
 });
 
