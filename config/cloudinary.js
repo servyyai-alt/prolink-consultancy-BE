@@ -19,9 +19,9 @@ const uploadToCloudinary = async (filePath, folder = 'prolink', options = {}) =>
   }
 };
 
-const deleteFromCloudinary = async (publicId) => {
+const deleteFromCloudinary = async (publicId, options = {}) => {
   try {
-    await cloudinary.uploader.destroy(publicId);
+    return await cloudinary.uploader.destroy(publicId, options);
   } catch (error) {
     throw new Error(`Cloudinary delete failed: ${error.message}`);
   }
