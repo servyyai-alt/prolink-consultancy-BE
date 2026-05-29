@@ -12,6 +12,15 @@ const socialLinksSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const blogTableSchema = new mongoose.Schema(
+  {
+    title: { type: String, trim: true },
+    headers: [{ type: String, trim: true }],
+    rows: [[{ type: String, trim: true }]],
+  },
+  { _id: false }
+);
+
 const blogSchema = new mongoose.Schema(
   {
     title:    { type: String, required: true, trim: true },
@@ -43,6 +52,7 @@ const blogSchema = new mongoose.Schema(
     publishedAt:     Date,
     readTime:        Number,
     socialLinks:     { type: socialLinksSchema, default: () => ({}) },
+    tables:          { type: [blogTableSchema], default: [] },
     relatedPosts:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'Blog' }],
   },
   { timestamps: true }

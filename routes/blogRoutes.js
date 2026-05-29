@@ -14,6 +14,27 @@ const normalizeSocialLinks = (input = {}) => ({
   youtube: input.youtube?.trim() || undefined,
 });
 
+const normalizeTables = (input = []) => {
+  if (!Array.isArray(input)) return [];
+
+  return input.map((table) => {
+    const headers = Array.isArray(table.headers)
+      ? table.headers.map((header) => `${header}`.trim()).filter(Boolean)
+      : [];
+    const rows = Array.isArray(table.rows)
+      ? table.rows
+        .map((row) => Array.isArray(row) ? row.map((cell) => `${cell}`.trim()) : [])
+        .filter((row) => row.some(Boolean))
+      : [];
+
+    return {
+      title: table.title?.trim() || undefined,
+      headers,
+      rows,
+    };
+  }).filter((table) => table.headers.length > 0 && table.rows.length > 0);
+};
+
 const buildBlogPayload = (body = {}) => ({
   title: body.title?.trim(),
   category: body.category?.trim(),
@@ -23,6 +44,7 @@ const buildBlogPayload = (body = {}) => ({
   status: body.status,
   thumbnail: body.thumbnail?.url ? { url: body.thumbnail.url, public_id: body.thumbnail.public_id } : undefined,
   socialLinks: normalizeSocialLinks(body.socialLinks),
+  tables: normalizeTables(body.tables),
   relatedPosts: Array.isArray(body.relatedPosts) ? body.relatedPosts.filter(Boolean) : [],
   metaTitle: body.metaTitle?.trim() || undefined,
   metaDescription: body.metaDescription?.trim() || undefined,
