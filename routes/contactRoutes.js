@@ -4,6 +4,7 @@ const ContactInquiry = require('../models/ContactInquiry');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const { sendEmail, sendInBackground } = require('../utils/emailService');
 const { protect, optionalAuth } = require('../middlewares/auth');
+const { notifyAdmins } = require('../utils/notificationService');
 
 router.post('/', optionalAuth, async (req, res, next) => {
   try {
@@ -30,6 +31,19 @@ router.post('/', optionalAuth, async (req, res, next) => {
     const inquiry = await ContactInquiry.create({
       ...payload,
     });
+
+    await notifyAdmins(req, {
+      sender: req.user?._id,
+      type: 'message',
+      title: 'New Contact Inquiry',
+      message: `${req.body.name} submitted "${req.body.subject}".`,
+      link: '/admin/contacts',
+      data: {
+        inquiryId: inquiry._id.toString(),
+        service: req.body.service,
+      },
+    });
+
     sendSuccess(res, 201, 'Inquiry submitted. We will get back to you soon.', { data: { inquiry } });
     sendInBackground(
       () => sendEmail({

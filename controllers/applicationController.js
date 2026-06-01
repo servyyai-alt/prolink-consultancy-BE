@@ -1,8 +1,8 @@
 const Application = require('../models/Application');
 const Job = require('../models/Job');
-const Notification = require('../models/Notification');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
 const { sendInBackground, sendTemplateEmail } = require('../utils/emailService');
+const { createNotification, notifyAdmins } = require('../utils/notificationService');
 
 const APPLICATION_FLOW = {
   applied: ['screening', 'rejected'],
@@ -56,13 +56,29 @@ exports.applyForJob = async (req, res, next) => {
     await Job.findByIdAndUpdate(jobId, { $inc: { applications: 1 } });
 
     // Notify employer
-    await Notification.create({
+    await createNotification(req, {
       recipient: job.postedBy._id,
       sender: req.user._id,
       type: 'job_application',
       title: 'New Application Received',
       message: `${req.user.fullName} applied for ${job.title}`,
-      link: `/dashboard/applications/${application._id}`,
+      link: `/employer/applicants?job=${job._id}`,
+      data: {
+        applicationId: application._id.toString(),
+        jobId: job._id.toString(),
+      },
+    });
+
+    await notifyAdmins(req, {
+      sender: req.user._id,
+      type: 'job_application',
+      title: 'New Job Application',
+      message: `${req.user.fullName} applied for ${job.title}.`,
+      link: '/admin/applications',
+      data: {
+        applicationId: application._id.toString(),
+        jobId: job._id.toString(),
+      },
     });
 
     sendSuccess(res, 201, 'Application submitted successfully.', { data: { application } });
@@ -154,7 +170,7 @@ exports.updateApplicationStatus = async (req, res, next) => {
     await application.save();
 
     // Notify applicant
-    const notification = await Notification.create({
+    await createNotification(req, {
       recipient: application.applicant._id,
       sender: req.user._id,
       type: 'application_status',
@@ -162,8 +178,6 @@ exports.updateApplicationStatus = async (req, res, next) => {
       message: `Your application for ${application.job.title} is now ${status.replace(/_/g, ' ')}.`,
       link: `/dashboard/applications`,
     });
-
-    req.app.get('io')?.sendNotification?.(String(application.applicant._id), notification);
 
     sendSuccess(res, 200, 'Application status updated.', { data: { application } });
   } catch (error) {
@@ -227,7 +241,7 @@ exports.scheduleInterview = async (req, res, next) => {
     await application.save();
 
     // Notify applicant
-    const notification = await Notification.create({
+    await createNotification(req, {
       recipient: application.applicant._id,
       sender: req.user._id,
       type: 'interview_scheduled',
@@ -235,8 +249,6 @@ exports.scheduleInterview = async (req, res, next) => {
       message: `Interview scheduled for ${application.job.title} on ${interviewDate.toLocaleString()}`,
       link: '/dashboard/interviews',
     });
-
-    req.app.get('io')?.sendNotification?.(String(application.applicant._id), notification);
 
     sendSuccess(res, 200, 'Interview scheduled.', { data: { application } });
   } catch (error) {

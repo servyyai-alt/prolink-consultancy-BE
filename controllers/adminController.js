@@ -10,6 +10,8 @@ const TeamMember = require('../models/TeamMember');
 const Notification = require('../models/Notification');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
 const { sendEmail, sendInBackground } = require('../utils/emailService');
+const { createNotification } = require('../utils/notificationService');
+const { getPrimaryClientUrl } = require('../utils/clientUrls');
 
 const ADMIN_CREATABLE_ROLES = ['admin', 'recruiter', 'employer', 'job_seeker'];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -240,6 +242,22 @@ exports.approveUser = async (req, res, next) => {
 
     user.isApproved = approve === false ? false : true
     await user.save()
+
+    await createNotification(req, {
+      recipient: user._id,
+      sender: req.user._id,
+      type: 'account_verified',
+      title: user.isApproved ? 'Account Approved' : 'Account Approval Removed',
+      message: user.isApproved
+        ? 'Your account has been approved. You can now use all employer features.'
+        : 'Your account approval has been removed. Please contact support for details.',
+      link: user.role === 'employer' ? '/employer' : '/dashboard',
+      data: {
+        userId: user._id.toString(),
+        isApproved: user.isApproved,
+      },
+    })
+
     sendSuccess(res, 200, `User ${user.isApproved ? 'approved' : 'unapproved'}.`, { data: { user } })
   } catch (error) {
     next(error)
@@ -265,7 +283,7 @@ exports.deleteUser = async (req, res, next) => {
       Payment.deleteMany({ user: user._id }),
       Blog.deleteMany({ author: user._id }),
       Testimonial.deleteMany({ user: user._id }),
-      Notification.deleteMany({ user: user._id }),
+      Notification.deleteMany({ $or: [{ recipient: user._id }, { sender: user._id }] }),
       User.findByIdAndDelete(user._id),
     ]);
 
@@ -350,7 +368,12 @@ exports.updateContact = async (req, res, next) => {
 
     let notification = null;
     if (inquiry.user && (statusChanged || replyChanged)) {
-      notification = await Notification.create({
+      const inquiryUser = await User.findById(inquiry.user).select('role');
+      const requestLink = inquiryUser?.role === 'employer'
+        ? '/employer/contact-requests'
+        : '/dashboard/contact-requests';
+
+      notification = await createNotification(req, {
         recipient: inquiry.user,
         sender: req.user._id,
         type: 'contact_inquiry_update',
@@ -358,14 +381,13 @@ exports.updateContact = async (req, res, next) => {
         message: replyChanged
           ? `Your contact request "${inquiry.subject}" has a new reply from our team.`
           : `Your contact request "${inquiry.subject}" is now marked as ${nextStatus}.`,
-        link: '/dashboard/contact-requests',
+        link: requestLink,
         data: {
           inquiryId: inquiry._id.toString(),
           status: nextStatus,
         },
       });
 
-      req.app.get('io')?.sendNotification?.(String(inquiry.user), notification);
     }
 
     if (statusChanged || replyChanged) {
@@ -393,7 +415,7 @@ exports.updateContact = async (req, res, next) => {
                 ` : ''}
                 <p style="margin: 0; color: #64748b; line-height: 1.7;">
                   ${inquiry.user
-                    ? `You can also review this update in your dashboard at ${process.env.CLIENT_URL}/dashboard/contact-requests.`
+                    ? `You can also review this update in your dashboard at ${getPrimaryClientUrl()}/dashboard/contact-requests.`
                     : 'If you have more questions, you can reply with a new contact request anytime.'}
                 </p>
               </div>

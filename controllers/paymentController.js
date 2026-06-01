@@ -3,6 +3,7 @@ const Stripe = require('stripe');
 const crypto = require('crypto');
 const Payment = require('../models/Payment');
 const { sendSuccess, sendError } = require('../utils/response');
+const { createNotification, notifyAdmins } = require('../utils/notificationService');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -67,6 +68,31 @@ exports.verifyRazorpayPayment = async (req, res, next) => {
       { paymentId: razorpay_payment_id, signature: razorpay_signature, status: 'completed' },
       { new: true }
     );
+
+    if (payment) {
+      await createNotification(req, {
+        recipient: payment.user,
+        type: 'payment_success',
+        title: 'Payment Successful',
+        message: `Your payment of ${payment.currency} ${payment.amount} was completed successfully.`,
+        link: '/dashboard',
+        data: {
+          paymentId: payment._id.toString(),
+          type: payment.type,
+        },
+      });
+
+      await notifyAdmins(req, {
+        type: 'payment_success',
+        title: 'Payment Received',
+        message: `${payment.currency} ${payment.amount} received for ${payment.type || 'service'}.`,
+        link: '/admin/payments',
+        data: {
+          paymentId: payment._id.toString(),
+          type: payment.type,
+        },
+      });
+    }
 
     sendSuccess(res, 200, 'Payment verified successfully.', { data: { payment } });
   } catch (error) {

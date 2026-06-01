@@ -1,4 +1,7 @@
 const nodemailer = require('nodemailer');
+const { getPrimaryClientUrl } = require('./clientUrls');
+
+const clientUrl = () => getPrimaryClientUrl();
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
@@ -62,7 +65,7 @@ const emailTemplates = {
         <div style="background: white; padding: 40px; border-radius: 0 0 8px 8px;">
           <h2>Welcome, ${name}! 🎊</h2>
           <p style="color: #666;">Thank you for joining ProLink Consultancy. We are excited to help you find your dream job or the perfect candidate.</p>
-          <a href="${process.env.CLIENT_URL}/jobs" style="background: #1a56db; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block; margin: 20px 0;">Browse Jobs →</a>
+          <a href="${clientUrl()}/jobs" style="background: #1a56db; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block; margin: 20px 0;">Browse Jobs →</a>
           <p style="color: #999; font-size: 14px;">Best regards,<br>The ProLink Team</p>
         </div>
       </div>
@@ -93,7 +96,7 @@ const emailTemplates = {
         <h2 style="color: #1a56db;">Application Confirmed ✅</h2>
         <p>Hi ${applicantName},</p>
         <p>Your application for <strong>${jobTitle}</strong> has been received successfully. We'll review it and get back to you shortly.</p>
-        <p>Track your applications in your <a href="${process.env.CLIENT_URL}/dashboard/applications">dashboard</a>.</p>
+        <p>Track your applications in your <a href="${clientUrl()}/dashboard/applications">dashboard</a>.</p>
         <p>Best of luck!<br>The ProLink Team</p>
       </div>
     `,

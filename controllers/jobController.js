@@ -1,6 +1,7 @@
 const Job = require('../models/Job');
 const Application = require('../models/Application');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
+const { notifyAdmins } = require('../utils/notificationService');
 
 const ALLOWED_JOB_TYPES = ['full_time', 'part_time', 'contract', 'internship', 'freelance'];
 const ALLOWED_LOCATION_TYPES = ['onsite', 'remote', 'hybrid'];
@@ -206,6 +207,21 @@ exports.createJob = async (req, res, next) => {
     };
 
     const job = await Job.create(jobData);
+
+    if (req.user.role === 'employer') {
+      await notifyAdmins(req, {
+        sender: req.user._id,
+        type: 'job_posted',
+        title: 'New Job Posted',
+        message: `${req.user.company?.name || req.user.fullName || 'An employer'} posted ${job.title}.`,
+        link: '/admin/jobs',
+        data: {
+          jobId: job._id.toString(),
+          status: job.status,
+        },
+      });
+    }
+
     sendSuccess(res, 201, 'Job posted successfully.', { data: { job } });
   } catch (error) {
     next(error);

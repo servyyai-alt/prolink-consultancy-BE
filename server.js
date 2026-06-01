@@ -14,6 +14,7 @@ require('dotenv').config();
 const connectDB = require('./config/db');
 const errorHandler = require('./middlewares/errorHandler');
 const socketHandler = require('./sockets/socketHandler');
+const { getClientUrls, getPrimaryClientUrl } = require('./utils/clientUrls');
 
 // Route imports
 const authRoutes = require('./routes/authRoutes');
@@ -39,10 +40,24 @@ const brochureRoutes = require('./routes/brochureRoutes');
 const app = express();
 const httpServer = createServer(app);
 
+const allowedClientUrls = getClientUrls();
+const primaryClientUrl = getPrimaryClientUrl();
+
+const corsOrigin = (origin, callback) => {
+  if (!origin) return callback(null, true);
+
+  const normalizedOrigin = origin.replace(/\/$/, '');
+  if (allowedClientUrls.includes(normalizedOrigin)) return callback(null, true);
+
+  return callback(new Error(`Origin ${origin} is not allowed by CORS.`));
+};
+
+app.set('clientUrl', primaryClientUrl);
+
 // Socket.io setup
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL,
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -81,7 +96,7 @@ app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'));
 
 // CORS
 app.use(cors({
-  origin: process.env.CLIENT_URL,
+  origin: corsOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],

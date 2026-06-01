@@ -3,6 +3,8 @@ const User = require('../models/User');
 const { sendSuccess, sendError } = require('../utils/response');
 const { generateTokenPair, verifyRefreshToken, generateAccessToken } = require('../utils/tokens');
 const { sendInBackground, sendTemplateEmail } = require('../utils/emailService');
+const { createNotification, notifyAdmins } = require('../utils/notificationService');
+const { getPrimaryClientUrl } = require('../utils/clientUrls');
 
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
 
@@ -33,6 +35,18 @@ exports.register = async (req, res, next) => {
     const otp = user.generateOTP();
     await user.save();
 
+    await notifyAdmins(req, {
+      sender: user._id,
+      type: 'system',
+      title: userRole === 'employer' ? 'New Employer Registered' : 'New Job Seeker Registered',
+      message: `${user.firstName} ${user.lastName} registered as ${userRole.replace('_', ' ')}.`,
+      link: '/admin/users',
+      data: {
+        userId: user._id.toString(),
+        role: userRole,
+      },
+    });
+
     sendSuccess(res, 201, 'Registration successful. Please verify your email.', {
       data: { userId: user._id, email: user.email },
     });
@@ -60,6 +74,14 @@ exports.verifyOTP = async (req, res, next) => {
     const { accessToken, refreshToken } = generateTokenPair(user._id, user.role);
     user.refreshToken = refreshToken;
     await user.save();
+
+    await createNotification(req, {
+      recipient: user._id,
+      type: 'account_verified',
+      title: 'Account Verified',
+      message: 'Your email has been verified successfully.',
+      link: user.role === 'employer' ? '/employer' : '/dashboard',
+    });
 
     sendSuccess(res, 200, 'Email verified successfully.', {
       data: { accessToken, refreshToken, user: sanitizeUser(user) },
@@ -131,7 +153,7 @@ exports.forgotPassword = async (req, res, next) => {
     const resetToken = user.generatePasswordResetToken();
     await user.save();
 
-    const resetLink = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
+    const resetLink = `${getPrimaryClientUrl()}/reset-password/${resetToken}`;
     sendSuccess(res, 200, 'If this email exists, a reset link has been sent.');
 
     sendInBackground(() => sendTemplateEmail(email, 'passwordReset', resetLink, user.firstName), 'Password reset email');
