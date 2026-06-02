@@ -36,6 +36,10 @@ const eventRoutes = require('./routes/eventRoutes');
 const cateringRoutes = require('./routes/cateringRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const brochureRoutes = require('./routes/brochureRoutes');
+const Job = require('./models/Job');
+const Blog = require('./models/Blog');
+const Service = require('./models/Service');
+const { buildSitemapXml, getSitemapEntries } = require('./utils/sitemap');
 
 const app = express();
 const httpServer = createServer(app);
@@ -110,6 +114,47 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV,
     timestamp: new Date().toISOString(),
   });
+});
+
+app.get('/robots.txt', (req, res) => {
+  const siteUrl = primaryClientUrl.replace(/\/+$/, '');
+  res.type('text/plain').send([
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /admin',
+    'Disallow: /admin/',
+    'Disallow: /dashboard',
+    'Disallow: /dashboard/',
+    'Disallow: /employer',
+    'Disallow: /employer/',
+    'Disallow: /api',
+    'Disallow: /api/',
+    'Disallow: /login',
+    'Disallow: /register',
+    'Disallow: /verify-otp',
+    'Disallow: /forgot-password',
+    'Disallow: /reset-password',
+    'Disallow: /submit-testimonial',
+    '',
+    `Sitemap: ${siteUrl}/sitemap.xml`,
+  ].join('\n'));
+});
+
+app.get('/sitemap.xml', async (req, res, next) => {
+  try {
+    const entries = await getSitemapEntries({
+      baseUrl: primaryClientUrl,
+      Job,
+      Blog,
+      Service,
+    });
+
+    res.set('Content-Type', 'application/xml');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(buildSitemapXml(entries));
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Routes
