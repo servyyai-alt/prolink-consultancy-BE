@@ -131,7 +131,6 @@ app.get('/robots.txt', (req, res) => {
     'Disallow: /api/',
     'Disallow: /login',
     'Disallow: /register',
-    'Disallow: /verify-otp',
     'Disallow: /forgot-password',
     'Disallow: /reset-password',
     'Disallow: /submit-testimonial',
