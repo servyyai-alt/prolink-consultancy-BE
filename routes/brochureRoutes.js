@@ -4,7 +4,7 @@ const router = express.Router();
 const Brochure = require('../models/Brochure');
 const { protect, authorize } = require('../middlewares/auth');
 const { anyUpload } = require('../middlewares/upload');
-const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
+const { cloudinary, uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 const { sendSuccess, sendError } = require('../utils/response');
 
 router.get('/', async (req, res, next) => {
@@ -19,6 +19,37 @@ router.get('/', async (req, res, next) => {
         count: brochures.length,
       },
     });
+  } catch (e) { next(e); }
+});
+
+router.get('/:id/open', async (req, res, next) => {
+  try {
+    const brochure = await Brochure.findById(req.params.id).select('url mimeType fileName publicId isActive');
+
+    if (!brochure || !brochure.isActive) {
+      return sendError(res, 404, 'Brochure not found.');
+    }
+
+    const isPdf =
+      (brochure.mimeType || '').toLowerCase() === 'application/pdf' ||
+      brochure.fileName?.toLowerCase().endsWith('.pdf');
+
+    if (!isPdf) {
+      return res.redirect(302, brochure.url);
+    }
+
+    const publicId =
+      brochure.publicId ||
+      brochure.url.split('/upload/').pop()?.replace(/\.pdf$/i, '');
+
+    const signedPdfUrl = cloudinary.utils.private_download_url(publicId, 'pdf', {
+      resource_type: 'image',
+      type: 'upload',
+      secure: true,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    return res.redirect(302, signedPdfUrl);
   } catch (e) { next(e); }
 });
 
