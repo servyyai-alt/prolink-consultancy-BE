@@ -150,7 +150,7 @@ router.post('/save-job/:jobId', protect, async (req, res, next) => {
 
 router.get('/saved-jobs', protect, async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id).populate('savedJobs', 'title company location type salary slug status');
+    const user = await User.findById(req.user._id).populate('savedJobs', 'title company location state district address type salary slug status');
     sendSuccess(res, 200, 'Saved jobs fetched.', { data: { savedJobs: user.savedJobs } });
   } catch (e) { next(e); }
 });

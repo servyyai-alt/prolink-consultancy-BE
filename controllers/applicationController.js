@@ -102,7 +102,7 @@ exports.getMyApplications = async (req, res, next) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [applications, total] = await Promise.all([
       Application.find(query)
-        .populate('job', 'title company location type salary slug status')
+        .populate('job', 'title company location state district address type salary slug status')
         .populate('statusHistory.changedBy', 'firstName lastName role')
         .sort('-createdAt')
         .skip(skip)

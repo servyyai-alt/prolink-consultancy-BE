@@ -473,6 +473,9 @@ exports.getApplications = async (req, res, next) => {
           { title: new RegExp(search, 'i') },
           { 'company.name': new RegExp(search, 'i') },
           { location: new RegExp(search, 'i') },
+          { state: new RegExp(search, 'i') },
+          { district: new RegExp(search, 'i') },
+          { address: new RegExp(search, 'i') },
         ],
       }).select('_id');
 
@@ -488,7 +491,7 @@ exports.getApplications = async (req, res, next) => {
       Application.find(query)
         .populate('applicant', 'firstName lastName email avatar')
         .populate('employer', 'firstName lastName email')
-        .populate('job', 'title slug location company type')
+        .populate('job', 'title slug location state district address company type')
         .sort('-createdAt')
         .skip(skip)
         .limit(parseInt(limit)),

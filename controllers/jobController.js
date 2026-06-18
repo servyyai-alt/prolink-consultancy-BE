@@ -9,6 +9,34 @@ const ALLOWED_JOB_STATUSES = ['draft', 'active', 'paused', 'closed', 'expired'];
 const URL_REGEX = /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/.*)?$/i;
 
 const cleanString = (value) => (typeof value === 'string' ? value.trim() : '');
+const buildLocation = ({ address, district, state }) => [address, district, state]
+  .map((part) => cleanString(part))
+  .filter((part, index, arr) => Boolean(part) && arr.indexOf(part) === index)
+  .join(', ');
+const splitLegacyLocation = (location = '') => {
+  const parts = cleanString(location)
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 3) {
+    return {
+      address: parts.slice(0, parts.length - 2).join(', '),
+      district: parts[parts.length - 2] || '',
+      state: parts[parts.length - 1] || '',
+    };
+  }
+
+  if (parts.length === 2) {
+    return { address: parts[0] || '', district: parts[0] || '', state: parts[1] || '' };
+  }
+
+  if (/^remote\b/i.test(parts[0] || '')) {
+    return { address: '', district: '', state: '' };
+  }
+
+  return { address: '', district: '', state: parts[0] || '' };
+};
 const toNumber = (value) => {
   if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
@@ -35,6 +63,10 @@ const validateJobPayload = (body = {}, user) => {
   const type = cleanString(body.type) || 'full_time';
   const locationType = cleanString(body.locationType) || 'onsite';
   const location = cleanString(body.location);
+  const legacyLocation = splitLegacyLocation(location);
+  const state = cleanString(body.state) || legacyLocation.state;
+  const district = cleanString(body.district) || legacyLocation.district;
+  const address = cleanString(body.address) || legacyLocation.address;
   const education = cleanString(body.education);
   const deadline = body.deadline ? new Date(body.deadline) : null;
   const openings = toNumber(body.openings);
@@ -57,7 +89,11 @@ const validateJobPayload = (body = {}, user) => {
   if (!category) errors.category = 'Category is required.';
   if (!ALLOWED_JOB_TYPES.includes(type)) errors.type = 'Select a valid job type.';
   if (!ALLOWED_LOCATION_TYPES.includes(locationType)) errors.locationType = 'Select a valid work mode.';
-  if (!location || location.length < 2) errors.location = 'Location is required.';
+  if (locationType !== 'remote') {
+    if (!state || state.length < 2) errors.state = 'State is required.';
+    if (!district || district.length < 2) errors.district = 'District is required.';
+    if (!address || address.length < 5) errors.address = 'Address must be at least 5 characters.';
+  }
   if (openings === null || openings < 1 || openings > 1000) errors.openings = 'Openings must be between 1 and 1000.';
   if (!education || education.length < 2) errors.education = 'Education is required.';
   if (minExperience === null || minExperience < 0) errors.experienceMin = 'Minimum experience must be 0 or more.';
@@ -103,7 +139,10 @@ const validateJobPayload = (body = {}, user) => {
       category,
       type,
       locationType,
-      location,
+      location: buildLocation({ address, district, state }) || location || (locationType === 'remote' ? 'Remote' : ''),
+      state,
+      district,
+      address,
       education,
       openings,
       deadline: deadline || undefined,
@@ -128,37 +167,157 @@ const validateJobPayload = (body = {}, user) => {
 };
 
 // @GET /api/v1/jobs  - Public, with filters
+// exports.getJobs = async (req, res, next) => {
+//   try {
+//     const {
+//       page = 1, limit = 12, search, category, type, locationType,
+//       minExp, maxExp, minSalary, maxSalary, skills, location, featured, sort = '-createdAt',
+//     } = req.query;
+
+//     const query = { status: 'active', isDeleted: false };
+
+//     if (search) query.$text = { $search: search };
+//     if (category) query.category = category;
+//     if (type) query.type = type;
+//     if (locationType) query.locationType = locationType;
+//     if (location) {
+//       query.$or = [
+//         { location: new RegExp(location, 'i') },
+//         { state: new RegExp(location, 'i') },
+//         { district: new RegExp(location, 'i') },
+//         { address: new RegExp(location, 'i') },
+//       ];
+//     }
+//     if (featured === 'true') query.featured = true;
+//     if (minExp !== undefined) query['experience.min'] = { $gte: parseInt(minExp) };
+//     if (maxExp !== undefined) query['experience.max'] = { $lte: parseInt(maxExp) };
+//     if (minSalary) query['salary.min'] = { $gte: parseInt(minSalary) };
+//     if (maxSalary) query['salary.max'] = { $lte: parseInt(maxSalary) };
+//     if (skills) {
+//       const skillArr = Array.isArray(skills) ? skills : skills.split(',');
+//       query.skills = { $in: skillArr };
+//     }
+
+//     const skip = (parseInt(page) - 1) * parseInt(limit);
+//     const [jobs, total] = await Promise.all([
+//       Job.find(query).sort(sort).skip(skip).limit(parseInt(limit)).populate('postedBy', 'firstName lastName company'),
+//       Job.countDocuments(query),
+//     ]);
+
+//     sendPaginated(res, jobs, total, page, limit, 'Jobs fetched successfully.');
+//   } catch (error) {
+//     next(error);
+//   }
+// };
 exports.getJobs = async (req, res, next) => {
   try {
     const {
-      page = 1, limit = 12, search, category, type, locationType,
-      minExp, maxExp, minSalary, maxSalary, skills, location, featured, sort = '-createdAt',
+      page = 1,
+      limit = 12,
+      search,
+      category,
+      type,
+      locationType,
+      minExp,
+      maxExp,
+      minSalary,
+      maxSalary,
+      skills,
+      location,
+      featured,
+      sort = '-createdAt',
     } = req.query;
 
-    const query = { status: 'active', isDeleted: false };
+    const query = {
+      status: 'active',
+      isDeleted: false,
+    };
 
-    if (search) query.$text = { $search: search };
+    // Global Search (Case Insensitive)
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { companyName: { $regex: search, $options: 'i' } },
+        { skills: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { location: { $regex: search, $options: 'i' } },
+        { state: { $regex: search, $options: 'i' } },
+        { district: { $regex: search, $options: 'i' } },
+      ];
+    }
+
     if (category) query.category = category;
     if (type) query.type = type;
     if (locationType) query.locationType = locationType;
-    if (location) query.location = new RegExp(location, 'i');
-    if (featured === 'true') query.featured = true;
-    if (minExp !== undefined) query['experience.min'] = { $gte: parseInt(minExp) };
-    if (maxExp !== undefined) query['experience.max'] = { $lte: parseInt(maxExp) };
-    if (minSalary) query['salary.min'] = { $gte: parseInt(minSalary) };
-    if (maxSalary) query['salary.max'] = { $lte: parseInt(maxSalary) };
-    if (skills) {
-      const skillArr = Array.isArray(skills) ? skills : skills.split(',');
-      query.skills = { $in: skillArr };
+
+    // Location Search (Case Insensitive)
+    if (location) {
+      query.$and = [
+        ...(query.$and || []),
+        {
+          $or: [
+            { location: { $regex: location, $options: 'i' } },
+            { state: { $regex: location, $options: 'i' } },
+            { district: { $regex: location, $options: 'i' } },
+            { address: { $regex: location, $options: 'i' } },
+          ],
+        },
+      ];
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    if (featured === 'true') query.featured = true;
+
+    if (minExp !== undefined) {
+      query['experience.min'] = { $gte: Number(minExp) };
+    }
+
+    if (maxExp !== undefined) {
+      query['experience.max'] = { $lte: Number(maxExp) };
+    }
+
+    if (minSalary) {
+      query['salary.min'] = { $gte: Number(minSalary) };
+    }
+
+    if (maxSalary) {
+      query['salary.max'] = { $lte: Number(maxSalary) };
+    }
+
+    // Skills Search (Case Insensitive)
+    if (skills) {
+      const skillArr = Array.isArray(skills)
+        ? skills
+        : skills.split(',');
+
+      query.skills = {
+        $in: skillArr.map(
+          skill => new RegExp(`^${skill.trim()}$`, 'i')
+        ),
+      };
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+
     const [jobs, total] = await Promise.all([
-      Job.find(query).sort(sort).skip(skip).limit(parseInt(limit)).populate('postedBy', 'firstName lastName company'),
+      Job.find(query)
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .populate(
+          'postedBy',
+          'firstName lastName company'
+        ),
       Job.countDocuments(query),
     ]);
 
-    sendPaginated(res, jobs, total, page, limit, 'Jobs fetched successfully.');
+    sendPaginated(
+      res,
+      jobs,
+      total,
+      page,
+      limit,
+      'Jobs fetched successfully.'
+    );
   } catch (error) {
     next(error);
   }
@@ -180,7 +339,7 @@ exports.getJobBySlug = async (req, res, next) => {
       category: job.category,
       status: 'active',
       isDeleted: false,
-    }).limit(4).select('title company location type salary experience slug');
+    }).limit(4).select('title company location state district address type salary experience slug');
 
     sendSuccess(res, 200, 'Job fetched.', { data: { job, similarJobs: similar } });
   } catch (error) {
@@ -203,6 +362,7 @@ exports.createJob = async (req, res, next) => {
 
     const jobData = {
       ...data,
+      location: buildLocation(data) || (data.locationType === 'remote' ? 'Remote' : ''),
       postedBy: req.user._id,
     };
 
@@ -238,7 +398,16 @@ exports.updateJob = async (req, res, next) => {
     const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
     if (!isOwner && !isAdmin) return sendError(res, 403, 'Not authorized.');
 
-    job = await Job.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const { errors, data } = validateJobPayload(req.body, req.user);
+    if (Object.keys(errors).length > 0) {
+      return sendError(res, 400, 'Please review the job details and try again.', errors);
+    }
+
+    job = await Job.findByIdAndUpdate(
+      req.params.id,
+      { ...data, location: buildLocation(data) || (data.locationType === 'remote' ? 'Remote' : '') },
+      { new: true, runValidators: true }
+    );
     sendSuccess(res, 200, 'Job updated.', { data: { job } });
   } catch (error) {
     next(error);

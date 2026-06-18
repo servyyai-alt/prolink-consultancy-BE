@@ -19,6 +19,9 @@ const jobSchema = new mongoose.Schema(
     postedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 
     location:    { type: String, required: true },
+    state:       { type: String, trim: true },
+    district:    { type: String, trim: true },
+    address:     { type: String, trim: true },
     locationType:{ type: String, enum: ['onsite', 'remote', 'hybrid'], default: 'onsite' },
 
     category:    { type: String, required: true },
