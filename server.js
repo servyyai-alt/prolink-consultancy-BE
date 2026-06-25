@@ -127,8 +127,6 @@ app.get('/robots.txt', (req, res) => {
     'Disallow: /dashboard/',
     'Disallow: /employer',
     'Disallow: /employer/',
-    'Disallow: /api',
-    'Disallow: /api/',
     'Disallow: /login',
     'Disallow: /register',
     'Disallow: /forgot-password',
