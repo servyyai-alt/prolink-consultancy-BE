@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middlewares/auth');
 const User = require('../models/User');
+const Application = require('../models/Application');
 const { cloudinary, uploadToCloudinary } = require('../config/cloudinary');
 const { imageUpload, resumeUpload } = require('../middlewares/upload');
 const { sendSuccess, sendError } = require('../utils/response');
+const path = require('path');
 const fs = require('fs');
 
 const copyAllowed = (target, source, allowedFields, prefix = '') => {
@@ -61,6 +63,44 @@ const getProfileUpdates = (body) => {
 
 const cleanupFile = (file) => {
   if (file?.path) fs.unlink(file.path, () => {});
+};
+
+const buildResumeFilename = (user, resumeUrl) => {
+  let extension = '.pdf';
+
+  try {
+    const pathname = new URL(resumeUrl).pathname;
+    extension = path.extname(pathname) || extension;
+  } catch (_) {}
+
+  const name = [user.firstName, user.lastName, 'resume']
+    .filter(Boolean)
+    .join('-')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return `${name || 'resume'}${extension}`;
+};
+
+const buildResumeDownloadUrl = (resume) => {
+  const resumeUrl = resume?.url || '';
+  const publicId = resume?.public_id || resumeUrl.split('/upload/').pop()?.replace(/\.[^.]+$/i, '');
+  let format = 'pdf';
+
+  try {
+    const pathname = new URL(resumeUrl).pathname;
+    format = path.extname(pathname).replace('.', '') || format;
+  } catch (_) {}
+
+  return cloudinary.utils.private_download_url(publicId, format, {
+    resource_type: 'raw',
+    type: 'upload',
+    attachment: true,
+    secure: true,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
 };
 
 router.get('/profile', protect, async (req, res) => {
@@ -130,6 +170,31 @@ router.post('/upload-resume', protect, resumeUpload.single('resume'), async (req
     sendSuccess(res, 200, 'Resume uploaded.', { data: { resume, user } });
   } catch (e) {
     cleanupFile(req.file);
+    next(e);
+  }
+});
+
+router.get('/:userId/resume/download', protect, async (req, res, next) => {
+  try {
+    const targetUser = await User.findById(req.params.userId).select('firstName lastName role profile.resume');
+    if (!targetUser?.profile?.resume?.url) {
+      return sendError(res, 404, 'Resume not found.');
+    }
+
+    const isSelf = req.user._id.toString() === targetUser._id.toString();
+    const isStaff = ['admin', 'super_admin', 'recruiter'].includes(req.user.role);
+    const isEmployerWithApplication =
+      req.user.role === 'employer'
+        ? await Application.exists({ applicant: targetUser._id, employer: req.user._id })
+        : false;
+
+    if (!isSelf && !isStaff && !isEmployerWithApplication) {
+      return sendError(res, 403, 'Not authorized to access this resume.');
+    }
+
+    const downloadUrl = buildResumeDownloadUrl(targetUser.profile.resume);
+    return res.redirect(302, downloadUrl);
+  } catch (e) {
     next(e);
   }
 });
