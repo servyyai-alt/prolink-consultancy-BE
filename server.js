@@ -36,6 +36,7 @@ const eventRoutes = require('./routes/eventRoutes');
 const cateringRoutes = require('./routes/cateringRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const brochureRoutes = require('./routes/brochureRoutes');
+const jobSeekerLeadRoutes = require('./routes/jobSeekerLeadRoutes');
 const Job = require('./models/Job');
 const Blog = require('./models/Blog');
 const Service = require('./models/Service');
@@ -174,6 +175,7 @@ app.use('/api/v1/events', eventRoutes);
 app.use('/api/v1/catering', cateringRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/brochures', brochureRoutes);
+app.use('/api/v1/job-seeker-leads', jobSeekerLeadRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

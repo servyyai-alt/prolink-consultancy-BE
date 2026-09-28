@@ -679,3 +679,133 @@ exports.deleteTestimonial = async (req, res, next) => {
     next(error);
   }
 };
+
+// @GET /api/v1/admin/jobs/:jobId/resumes/download
+exports.getJobApplicantResumes = async (req, res, next) => {
+  try {
+    const { jobId } = req.params;
+    const job = await Job.findById(jobId).select('title company').lean();
+    if (!job) return sendError(res, 404, 'Job not found.');
+
+    const applications = await Application.find({ job: jobId })
+      .populate('applicant', 'firstName lastName email phone profile.resume profile.headline profile.skills')
+      .sort('-createdAt')
+      .lean();
+
+    const applicants = applications.map((app) => {
+      const resumeUrl = app.resume?.url || app.applicant?.profile?.resume?.url || null;
+      return {
+        applicationId: app._id,
+        applicantId:   app.applicant?._id,
+        name:          `${app.applicant?.firstName || ''} ${app.applicant?.lastName || ''}`.trim(),
+        email:         app.applicant?.email,
+        phone:         app.applicant?.phone,
+        headline:      app.applicant?.profile?.headline,
+        skills:        app.applicant?.profile?.skills || [],
+        appliedAt:     app.createdAt,
+        status:        app.status,
+        resumeUrl,
+        hasResume:     !!resumeUrl,
+      };
+    });
+
+    sendSuccess(res, 200, 'Job applicant resumes fetched.', {
+      data: {
+        job: { _id: job._id, title: job.title, company: job.company },
+        applicants,
+        total: applicants.length,
+        withResume: applicants.filter((a) => a.hasResume).length,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @GET /api/v1/admin/resumes/download-all
+exports.getAllJobSeekerResumes = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 50, search, availability } = req.query;
+    const query = {
+      role: 'job_seeker',
+      'profile.resume.url': { $exists: true, $ne: '' },
+    };
+    if (search) {
+      const regex = new RegExp(escapeRegex(search.trim()), 'i');
+      query.$or = [
+        { firstName: regex },
+        { lastName: regex },
+        { email: regex },
+        { 'profile.headline': regex },
+        { phone: regex },
+      ];
+    }
+    if (availability) query['profile.availability'] = availability;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [users, total] = await Promise.all([
+      User.find(query)
+        .select('firstName lastName email phone profile.headline profile.skills profile.resume profile.availability profile.location createdAt')
+        .sort('-profile.resume.uploadedAt')
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      User.countDocuments(query),
+    ]);
+
+    const data = users.map((u) => ({
+      userId:       u._id,
+      name:         `${u.firstName} ${u.lastName}`,
+      email:        u.email,
+      phone:        u.phone,
+      headline:     u.profile?.headline,
+      skills:       u.profile?.skills || [],
+      availability: u.profile?.availability,
+      location:     u.profile?.location,
+      resumeUrl:    u.profile?.resume?.url,
+      uploadedAt:   u.profile?.resume?.uploadedAt,
+      registeredAt: u.createdAt,
+    }));
+
+    sendPaginated(res, data, total, page, limit);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @GET /api/v1/admin/job-seeker-leads
+exports.getJobSeekerLeads = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, search, status } = req.query;
+    const query = { source: 'job_seeker_lead' };
+    if (status) query.status = status;
+    if (search) {
+      const regex = new RegExp(escapeRegex(search.trim()), 'i');
+      query.$or = [{ name: regex }, { email: regex }, { phone: regex }, { message: regex }];
+    }
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [leads, total] = await Promise.all([
+      ContactInquiry.find(query).sort('-createdAt').skip(skip).limit(parseInt(limit)).lean(),
+      ContactInquiry.countDocuments(query),
+    ]);
+    sendPaginated(res, leads, total, page, limit);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @PATCH /api/v1/admin/job-seeker-leads/:id
+exports.updateJobSeekerLead = async (req, res, next) => {
+  try {
+    const { status, internalNotes } = req.body || {};
+    const allowedStatuses = ['new', 'read', 'replied', 'closed'];
+    const lead = await ContactInquiry.findOne({ _id: req.params.id, source: 'job_seeker_lead' });
+    if (!lead) return sendError(res, 404, 'Lead not found.');
+    if (status && allowedStatuses.includes(status)) lead.status = status;
+    if (typeof internalNotes === 'string') lead.internalNotes = internalNotes.trim();
+    await lead.save();
+    sendSuccess(res, 200, 'Lead updated.', { data: { lead } });
+  } catch (error) {
+    next(error);
+  }
+};
