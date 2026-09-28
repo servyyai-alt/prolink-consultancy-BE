@@ -7,7 +7,6 @@ const { cloudinary, uploadToCloudinary } = require('../config/cloudinary');
 const { imageUpload, resumeUpload } = require('../middlewares/upload');
 const { sendSuccess, sendError } = require('../utils/response');
 const path = require('path');
-const fs = require('fs');
 
 const copyAllowed = (target, source, allowedFields, prefix = '') => {
   if (!source || typeof source !== 'object') return;
@@ -61,9 +60,9 @@ const getProfileUpdates = (body) => {
   return update;
 };
 
-const cleanupFile = (file) => {
-  if (file?.path) fs.unlink(file.path, () => {});
-};
+// No-op: memoryStorage writes nothing to disk, nothing to clean up
+const cleanupFile = () => {};
+
 
 const buildResumeFilename = (user, resumeUrl) => {
   let extension = '.pdf';
@@ -130,7 +129,7 @@ router.put('/change-password', protect, async (req, res, next) => {
 router.post('/upload-avatar', protect, imageUpload.single('avatar'), async (req, res, next) => {
   try {
     if (!req.file) return sendError(res, 400, 'No file uploaded.');
-    const result = await uploadToCloudinary(req.file.path, 'prolink/avatars', { width: 300, height: 300, crop: 'fill' });
+    const result = await uploadToCloudinary(req.file, 'prolink/avatars', { width: 300, height: 300, crop: 'fill' });
     cleanupFile(req.file);
     const user = await User.findByIdAndUpdate(req.user._id, { avatar: result }, { new: true });
     sendSuccess(res, 200, 'Avatar uploaded.', { data: { avatar: result, user } });
@@ -143,7 +142,7 @@ router.post('/upload-avatar', protect, imageUpload.single('avatar'), async (req,
 router.post('/upload-company-logo', protect, imageUpload.single('logo'), async (req, res, next) => {
   try {
     if (!req.file) return sendError(res, 400, 'No file uploaded.');
-    const result = await uploadToCloudinary(req.file.path, 'prolink/company-logos', { width: 300, height: 300, crop: 'fill' });
+    const result = await uploadToCloudinary(req.file, 'prolink/company-logos', { width: 300, height: 300, crop: 'fill' });
     cleanupFile(req.file);
     const user = await User.findByIdAndUpdate(req.user._id, { 'company.logo': result }, { new: true });
     sendSuccess(res, 200, 'Company logo uploaded.', { data: { logo: result, user } });
@@ -156,11 +155,17 @@ router.post('/upload-company-logo', protect, imageUpload.single('logo'), async (
 router.post('/upload-resume', protect, resumeUpload.single('resume'), async (req, res, next) => {
   try {
     if (!req.file) return sendError(res, 400, 'No file uploaded.');
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      resource_type: 'raw',
-      folder: 'prolink/resumes',
+    // Use upload_stream for buffer uploads (Vercel memoryStorage -- no disk access)
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { resource_type: 'raw', folder: 'prolink/resumes' },
+        (error, result) => {
+          if (error) return reject(new Error(`Cloudinary upload failed: ${error.message}`));
+          resolve(result);
+        },
+      );
+      stream.end(req.file.buffer);
     });
-    cleanupFile(req.file);
     const resume = {
       url: result.secure_url,
       public_id: result.public_id,

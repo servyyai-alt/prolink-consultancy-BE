@@ -65,7 +65,7 @@ router.post(
       if (!name) return sendError(res, 400, 'Brochure name is required.');
       if (!req.file) return sendError(res, 400, 'Brochure file is required.');
 
-      const uploadResult = await uploadToCloudinary(req.file.path, 'prolink/brochures');
+      const uploadResult = await uploadToCloudinary(req.file, 'prolink/brochures');
 
       const brochure = await Brochure.create({
         name,
@@ -77,11 +77,8 @@ router.post(
         uploadedBy: req.user._id,
       });
 
-      fs.unlink(req.file.path, () => {});
-
       sendSuccess(res, 201, 'Brochure uploaded.', { data: { brochure } });
     } catch (e) {
-      if (req.file?.path) fs.unlink(req.file.path, () => {});
       next(e);
     }
   }
