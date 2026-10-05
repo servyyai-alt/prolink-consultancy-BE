@@ -809,3 +809,38 @@ exports.updateJobSeekerLead = async (req, res, next) => {
     next(error);
   }
 };
+
+// @GET /api/v1/admin/job-seeker-leads/:id/resume/download
+exports.downloadLeadResume = async (req, res, next) => {
+  try {
+    const lead = await ContactInquiry.findOne({ _id: req.params.id, source: 'job_seeker_lead' });
+    if (!lead) return sendError(res, 404, 'Lead not found.');
+    const resumeUrl = lead.service;
+    if (!resumeUrl || !resumeUrl.startsWith('http')) {
+      return sendError(res, 404, 'Resume not found for this lead.');
+    }
+
+    const safeName = (lead.name || 'candidate').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const isDocx = resumeUrl.toLowerCase().includes('.docx');
+    const filename = `${safeName}-resume${isDocx ? '.docx' : '.pdf'}`;
+    const contentType = isDocx
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : 'application/pdf';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const https = require('https');
+    const http = require('http');
+    const client = resumeUrl.startsWith('https') ? https : http;
+
+    client.get(resumeUrl, (stream) => {
+      if (stream.statusCode >= 400) {
+        return sendError(res, stream.statusCode, 'Failed to fetch resume file.');
+      }
+      stream.pipe(res);
+    }).on('error', (err) => next(err));
+  } catch (error) {
+    next(error);
+  }
+};

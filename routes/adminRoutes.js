@@ -4,6 +4,7 @@ const {
   getDashboardStats, getUsers, createUser, toggleBlockUser, changeUserRole, deleteUser, approveUser,
   getContacts, updateContact, getPayments, getApplications, getBlogs, getServices, getTeamMembers, getTestimonials, approveTestimonial, updateTestimonial, deleteTestimonial,
   getJobApplicantResumes, getAllJobSeekerResumes, getJobSeekerLeads, updateJobSeekerLead,
+  downloadLeadResume,
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middlewares/auth');
 
@@ -30,6 +31,7 @@ router.delete('/testimonials/:id', ...adminOnly, deleteTestimonial);
 router.get('/jobs/:jobId/resumes/download', ...adminOnly, getJobApplicantResumes);
 router.get('/resumes/download-all', ...adminOnly, getAllJobSeekerResumes);
 router.get('/job-seeker-leads', ...adminOnly, getJobSeekerLeads);
+router.get('/job-seeker-leads/:id/resume/download', ...adminOnly, downloadLeadResume);
 router.patch('/job-seeker-leads/:id', ...adminOnly, updateJobSeekerLead);
 
 module.exports = router;
