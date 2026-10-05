@@ -198,22 +198,39 @@ router.get('/:userId/resume/download', protect, async (req, res, next) => {
     }
 
     const downloadUrl = buildResumeDownloadUrl(targetUser.profile.resume);
-    const safeName = [targetUser.firstName, targetUser.lastName, 'resume'].filter(Boolean).join('_').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const isDocx = targetUser.profile?.resume?.url?.toLowerCase().includes('.docx');
-    const filename = `${safeName || 'resume'}${isDocx ? '.docx' : '.pdf'}`;
-    const contentType = isDocx
-      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      : 'application/pdf';
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
     const https = require('https');
     https.get(downloadUrl, (stream) => {
       if (stream.statusCode >= 400) {
         return res.redirect(302, downloadUrl);
       }
-      stream.pipe(res);
+
+      stream.once('data', (firstChunk) => {
+        let ext = '.pdf';
+        let contentType = 'application/pdf';
+
+        if (firstChunk[0] === 0x50 && firstChunk[1] === 0x4B) {
+          ext = '.docx';
+          contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        } else if (firstChunk[0] === 0xD0 && firstChunk[1] === 0xCF) {
+          ext = '.doc';
+          contentType = 'application/msword';
+        } else if (targetUser.profile?.resume?.url?.toLowerCase().includes('.docx')) {
+          ext = '.docx';
+          contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        } else if (targetUser.profile?.resume?.url?.toLowerCase().includes('.doc')) {
+          ext = '.doc';
+          contentType = 'application/msword';
+        }
+
+        const safeName = [targetUser.firstName, targetUser.lastName, 'resume'].filter(Boolean).join('_').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `${safeName || 'resume'}${ext}`;
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+        res.write(firstChunk);
+        stream.pipe(res);
+      });
     }).on('error', () => {
       res.redirect(302, downloadUrl);
     });

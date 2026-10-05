@@ -856,16 +856,6 @@ exports.downloadLeadResume = async (req, res, next) => {
       return sendError(res, 404, 'Resume not found for this lead.');
     }
 
-    const safeName = (lead.name || 'candidate').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const isDocx = resumeUrl.toLowerCase().includes('.docx');
-    const filename = `${safeName}-resume${isDocx ? '.docx' : '.pdf'}`;
-    const contentType = isDocx
-      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      : 'application/pdf';
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
     const https = require('https');
     const http = require('http');
     const client = resumeUrl.startsWith('https') ? https : http;
@@ -874,7 +864,36 @@ exports.downloadLeadResume = async (req, res, next) => {
       if (stream.statusCode >= 400) {
         return sendError(res, stream.statusCode, 'Failed to fetch resume file.');
       }
-      stream.pipe(res);
+
+      stream.once('data', (firstChunk) => {
+        let ext = '.pdf';
+        let contentType = 'application/pdf';
+
+        if (firstChunk[0] === 0x50 && firstChunk[1] === 0x4B) {
+          // ZIP / DOCX format (PK\x03\x04)
+          ext = '.docx';
+          contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        } else if (firstChunk[0] === 0xD0 && firstChunk[1] === 0xCF) {
+          // OLE2 / Legacy DOC format
+          ext = '.doc';
+          contentType = 'application/msword';
+        } else if (resumeUrl.toLowerCase().includes('.docx')) {
+          ext = '.docx';
+          contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        } else if (resumeUrl.toLowerCase().includes('.doc')) {
+          ext = '.doc';
+          contentType = 'application/msword';
+        }
+
+        const safeName = (lead.name || 'candidate').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `${safeName}-resume${ext}`;
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+        res.write(firstChunk);
+        stream.pipe(res);
+      });
     }).on('error', (err) => next(err));
   } catch (error) {
     next(error);

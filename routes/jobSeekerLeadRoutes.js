@@ -16,7 +16,9 @@ router.post('/', anyUpload.single('resume'), async (req, res, next) => {
     if (!phone || !phone.trim()) return sendError(res, 400, 'Phone number is required.');
 
     let resumeUrl = null;
+    let resumeOriginalName = null;
     if (req.file) {
+      resumeOriginalName = req.file.originalname;
       const uploadResult = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           { resource_type: 'raw', folder: 'prolink/job-seeker-leads' },
@@ -42,6 +44,7 @@ router.post('/', anyUpload.single('resume'), async (req, res, next) => {
       location       ? `Location: ${location}` : '',
       skillsArr.length ? `Skills: ${skillsArr.join(', ')}` : '',
       message        ? `Message: ${message}` : '',
+      resumeOriginalName ? `Resume File: ${resumeOriginalName}` : '',
       resumeUrl      ? `Resume: ${resumeUrl}` : 'Resume: Not uploaded',
     ].filter(Boolean).join('\n');
 
@@ -52,6 +55,7 @@ router.post('/', anyUpload.single('resume'), async (req, res, next) => {
       subject,
       message:   messageBody,
       service:   resumeUrl || undefined,
+      resumeOriginalName: resumeOriginalName || undefined,
       source:    'job_seeker_lead',
       ipAddress: req.ip,
       userAgent: req.get('User-Agent'),

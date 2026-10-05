@@ -9,6 +9,7 @@ const contactInquirySchema = new mongoose.Schema(
     subject: { type: String, required: true },
     message: { type: String, required: true },
     service: String,
+    resumeOriginalName: String,
     status:  { type: String, enum: ['new', 'read', 'replied', 'closed'], default: 'new' },
     source:  { type: String, default: 'contact_form' },
     ipAddress: String,
