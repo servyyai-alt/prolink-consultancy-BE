@@ -12,6 +12,27 @@ const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
 const { sendEmail, sendInBackground } = require('../utils/emailService');
 const { createNotification } = require('../utils/notificationService');
 const { getPrimaryClientUrl } = require('../utils/clientUrls');
+const { cloudinary } = require('../config/cloudinary');
+const path = require('path');
+
+const buildResumeDownloadUrl = (resume) => {
+  const resumeUrl = resume?.url || '';
+  const publicId = resume?.public_id || resumeUrl.split('/upload/').pop()?.replace(/\.[^.]+$/i, '');
+  let format = 'pdf';
+
+  try {
+    const pathname = new URL(resumeUrl).pathname;
+    format = path.extname(pathname).replace('.', '') || format;
+  } catch (_) {}
+
+  return cloudinary.utils.private_download_url(publicId, format, {
+    resource_type: 'raw',
+    type: 'upload',
+    attachment: true,
+    secure: true,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+};
 
 const ADMIN_CREATABLE_ROLES = ['admin', 'recruiter', 'employer', 'job_seeker'];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -693,7 +714,13 @@ exports.getJobApplicantResumes = async (req, res, next) => {
       .lean();
 
     const applicants = applications.map((app) => {
-      const resumeUrl = app.resume?.url || app.applicant?.profile?.resume?.url || null;
+      const rawResume = app.resume?.url ? app.resume : app.applicant?.profile?.resume;
+      let resumeUrl = rawResume?.url || null;
+      try {
+        if (rawResume?.url || rawResume?.public_id) {
+          resumeUrl = buildResumeDownloadUrl(rawResume);
+        }
+      } catch (_) {}
       return {
         applicationId: app._id,
         applicantId:   app.applicant?._id,
@@ -753,19 +780,28 @@ exports.getAllJobSeekerResumes = async (req, res, next) => {
       User.countDocuments(query),
     ]);
 
-    const data = users.map((u) => ({
-      userId:       u._id,
-      name:         `${u.firstName} ${u.lastName}`,
-      email:        u.email,
-      phone:        u.phone,
-      headline:     u.profile?.headline,
-      skills:       u.profile?.skills || [],
-      availability: u.profile?.availability,
-      location:     u.profile?.location,
-      resumeUrl:    u.profile?.resume?.url,
-      uploadedAt:   u.profile?.resume?.uploadedAt,
-      registeredAt: u.createdAt,
-    }));
+    const data = users.map((u) => {
+      let resumeUrl = u.profile?.resume?.url || null;
+      try {
+        if (u.profile?.resume?.url || u.profile?.resume?.public_id) {
+          resumeUrl = buildResumeDownloadUrl(u.profile.resume);
+        }
+      } catch (_) {}
+
+      return {
+        userId:       u._id,
+        name:         `${u.firstName} ${u.lastName}`.trim(),
+        email:        u.email,
+        phone:        u.phone,
+        headline:     u.profile?.headline,
+        skills:       u.profile?.skills || [],
+        availability: u.profile?.availability,
+        location:     u.profile?.location,
+        resumeUrl,
+        uploadedAt:   u.profile?.resume?.uploadedAt,
+        registeredAt: u.createdAt,
+      };
+    });
 
     sendPaginated(res, data, total, page, limit);
   } catch (error) {
